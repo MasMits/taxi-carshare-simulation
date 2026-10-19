@@ -1,0 +1,2 @@
+mesa>=3.0,<4
+matplotlib>=3.8,<4
