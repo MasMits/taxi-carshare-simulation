@@ -1,77 +1,53 @@
-"""Passenger and taxi state machines using Mesa agents."""
+"""Agents of the taxi carshare simulation.
 
-from collections import deque
+Every agent follows the procedural loop perceive -> decide -> act and does at
+most one physical action per step.
+"""
 
 import mesa
 
-from .messages import Message
+# Taxi actions
+PICK_TARGET = "pick target"
+DRIVE = "drive"
 
 
-class PassengerAgent(mesa.Agent):
-    role = "Passenger"
+class Taxi(mesa.Agent):
+    """A taxi driving along the roads.
 
-    def __init__(self, model, destination):
-        super().__init__(model)
-        self.destination, self.state = destination, "ready"
-        self.inbox, self.trip_route = [], ()
-        self.pickup_tick = self.arrival_tick = None
+    When the taxi has no target, or has reached it, it picks a random road cell
+    and drives there.
 
-    def step(self):
-        if self.state == "ready":
-            self.trip_route = tuple(self.model.city.find_path(self.pos, self.destination))
-            self.model.send(Message("CFP", self, self.model.taxi, self.trip_route))
-            self.state = "requesting"
-        messages, self.inbox = self.inbox, []
-        for message in messages:
-            if message.kind == "PROPOSE" and self.state == "requesting":
-                self.model.send(Message("ACCEPT", self, message.sender, self.trip_route))
-                self.state = "waiting"
-            elif message.kind == "BOARD" and self.state == "waiting":
-                if self.pos != message.sender.pos:
-                    raise RuntimeError("Taxi must be at the pickup before boarding")
-                self.state, self.pickup_tick = "riding", self.model.ticks
-                self.model.send(Message("BOARDED", self, message.sender))
-            elif message.kind == "ARRIVED" and self.state == "riding":
-                if self.pos != self.destination:
-                    raise RuntimeError("Passenger has not reached the destination")
-                self.state, self.arrival_tick = "arrived", self.model.ticks
-
-
-class TaxiAgent(mesa.Agent):
-    role = "Taxi"
+    Beliefs:
+        target: road cell the taxi is driving to (None = no target).
+        progress: steps already spent on the current road cell.
+        km: road cells driven so far.
+    """
 
     def __init__(self, model):
         super().__init__(model)
-        self.state, self.passenger = "idle", None
-        self.inbox, self.path = [], deque()
-        self.trip_route = self.pickup_route = ()
-        self.distance = 0
+        self.target = None
+        self.progress = 0
+        self.km = 0
 
     def step(self):
-        messages, self.inbox = self.inbox, []
-        for message in messages:
-            if message.kind == "CFP" and self.state == "idle":
-                self.passenger, self.trip_route = message.sender, message.route
-                self.pickup_route = tuple(self.model.city.find_path(self.pos, message.route[0]))
-                self.model.send(Message("PROPOSE", self, self.passenger, eta=len(self.pickup_route) - 1))
-                self.state = "offered"
-                return
-            if message.kind == "ACCEPT" and self.state == "offered":
-                self.path, self.state = deque(self.pickup_route[1:]), "to_pickup"
-                return
-            if message.kind == "BOARDED" and self.state == "awaiting_boarding":
-                self.path, self.state = deque(self.trip_route[1:]), "transporting"
-                return
-        if self.state in ("to_pickup", "transporting"):
-            if self.path:
-                self.model.grid.move_agent(self, self.path.popleft())
-                self.distance += 1
-                if self.state == "transporting":
-                    self.model.grid.move_agent(self.passenger, self.pos)
-            if not self.path:
-                self.state = "boarding" if self.state == "to_pickup" else "dropping_off"
-        elif self.state in ("boarding", "dropping_off"):
-            kind, self.state = (
-                ("BOARD", "awaiting_boarding") if self.state == "boarding" else ("ARRIVED", "done")
-            )
-            self.model.send(Message(kind, self, self.passenger))
+        action = self.decide()  # 1. perceive (own position) + 2. deliberate
+        self.act(action)        # 3. act
+
+    def decide(self):
+        """Choose one action for this step."""
+        if self.target is None or self.target == self.pos:
+            return PICK_TARGET
+        return DRIVE
+
+    def act(self, action):
+        if action == PICK_TARGET:
+            self.target = self.model.random_road_cell()
+        elif action == DRIVE:
+            # Driving along a road cell takes `crossing_time` steps,
+            # then the taxi moves to the next one.
+            self.progress += 1
+            if self.progress >= self.model.crossing_time:
+                self.progress = 0
+                next_cell = self.model.next_cell(self.pos, self.target)
+                self.model.grid.move_agent(self, next_cell)
+                self.km += 1
