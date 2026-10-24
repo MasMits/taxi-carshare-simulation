@@ -5,7 +5,9 @@ Project of the course *Foundations of Agent-based Systems* (M1 DKAI, Université
 The development plan is in [PLAN.md](PLAN.md).
 
 The city is a grid of square districts separated by one-cell roads. Taxis drive only on the roads,
-along the shortest route; driving along one road cell takes `crossing_time` steps.
+along the shortest route; driving along one road cell takes `taxi_steps_per_cell` steps.
+Passengers appear on the roads and call taxis (call for proposals); each free taxi makes an
+offer, the passenger accepts the one that brings them to their destination earliest.
 
 ## Install
 Python 3.12 or newer.
@@ -30,7 +32,8 @@ run `python -m pip install "ipyvuetify<2"` and restart.
 ```
 main.py                     entry point (starts the web interface)
 taxi_simulation/model.py    CityModel: the city (environment), scheduler, statistics
-taxi_simulation/agents.py   the agents (Taxi)
+taxi_simulation/agents.py   the agents: Passenger and Taxi
+taxi_simulation/messages.py messages between agents (contract net protocol)
 taxi_simulation/app.py      SolaraViz interface
 tests/                      unit tests
 ```

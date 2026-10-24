@@ -2,6 +2,7 @@
 
 Every row and column whose index is a multiple of (district_size + 1) is a road.
 Taxis drive only on roads, along the shortest route (breadth-first search).
+Passengers appear on road cells and call taxis; the model carries their messages.
 
 Quick check:  python -m taxi_simulation.model
 """
@@ -11,7 +12,7 @@ from collections import deque
 import mesa
 from mesa.space import MultiGrid, PropertyLayer
 
-from .agents import Taxi
+from .agents import ASSIGNED, RIDING, WAITING, Passenger, Taxi
 
 # Values of the "terrain" layer, used to draw the map.
 DISTRICT_A = 0  # districts are painted as a checkerboard of A and B
@@ -32,28 +33,24 @@ class CityModel(mesa.Model):
         capacity: seats per taxi, 1 = classic taxi.
         allow_detour: False = no route change for shared rides.
         demand: mean number of new requests per step.
-        crossing_time: steps needed to drive along one road cell.
+        taxi_steps_per_cell: steps needed to drive along one road cell.
         boarding_time: steps needed to pick a passenger up.
-        max_wait: passenger patience in steps.
         max_detour: accepted ride <= max_detour * direct time.
-        warmup: statistics ignore requests made before this step.
         seed: random seed (reproducible runs).
     """
 
     def __init__(self, size=6, district_size=3, n_taxis=10, capacity=2,
-                 allow_detour=True, demand=0.6, crossing_time=1, boarding_time=1,
-                 max_wait=20, max_detour=1.5, warmup=0, seed=None):
+                 allow_detour=True, demand=0.6, taxi_steps_per_cell=1, boarding_time=1,
+                 max_detour=1.5, seed=None):
         super().__init__(rng=seed)  # `seed=` is deprecated since Mesa 3.5
         self.size = size
         self.district_size = district_size
         self.capacity = capacity
         self.allow_detour = allow_detour
         self.demand = demand
-        self.crossing_time = crossing_time
+        self.taxi_steps_per_cell = taxi_steps_per_cell
         self.boarding_time = boarding_time
-        self.max_wait = max_wait
         self.max_detour = max_detour
-        self.warmup = warmup
 
         # A road every `block` cells, including the city border.
         self.block = district_size + 1
@@ -78,10 +75,25 @@ class CityModel(mesa.Model):
         for _ in range(n_taxis):
             self.grid.place_agent(Taxi(self), self.random_road_cell())
 
+        # Statistics
+        self.spawned = 0
+        self.messages_sent = 0
+        self.trips = []  # finished trips: wait, ride, detour, shared
+
         # The DataCollector is an observer: it may read agent attributes,
         # agents may not read each other's (encapsulation).
         self.datacollector = mesa.DataCollector(model_reporters={
-            "Vehicle km": lambda m: sum(taxi.km for taxi in m.taxis()),
+            "Waiting": lambda m: m.count(WAITING, ASSIGNED),
+            "Riding": lambda m: m.count(RIDING),
+            "Served": lambda m: len(m.trips),
+            "Avg wait": lambda m: m.average("wait"),
+            "Avg ride": lambda m: m.average("ride"),
+            "Avg detour": lambda m: m.average("detour"),
+            "Vehicle km": lambda m: m.vehicle_km(),
+            "Km per passenger": lambda m: m.vehicle_km() / max(1, len(m.trips)),
+            "Shared %": lambda m: 100 * m.average("shared"),
+            "Empty km %": lambda m: 100 * sum(t.km_empty for t in m.taxis())
+                                    / max(1, m.vehicle_km()),
         })
         self.datacollector.collect(self)
 
@@ -129,7 +141,7 @@ class CityModel(mesa.Model):
 
     def travel_time(self, a, b):
         """Steps a taxi needs to drive from road cell a to road cell b."""
-        return self.crossing_time * self.distance(a, b)
+        return self.taxi_steps_per_cell * self.distance(a, b)
 
     def next_cell(self, pos, target):
         """Next road cell on a shortest road route from pos to target."""
@@ -140,21 +152,72 @@ class CityModel(mesa.Model):
         """All taxis of the city."""
         return self.agents.select(agent_type=Taxi)
 
+    def taxi_directory(self):
+        """Yellow pages: the taxis' addresses, so passengers can call them."""
+        return self.taxis()
+
+    def deliver(self, message):
+        """Message transport: put the message in the receiver's mailbox."""
+        message.receiver.inbox.append(message)
+        self.messages_sent += 1
+
+    # --- Passengers -----------------------------------------------------------
+
+    def spawn_passengers(self):
+        """New requests of this step (Poisson). Trips shorter than one block are walked."""
+        for _ in range(self.rng.poisson(self.demand)):
+            origin = self.random_road_cell()
+            destination = self.random_road_cell()
+            while self.distance(origin, destination) < self.block:
+                destination = self.random_road_cell()
+            self.add_passenger(origin, destination)
+
+    def add_passenger(self, origin, destination):
+        passenger = Passenger(self, origin, destination)
+        self.grid.place_agent(passenger, origin)
+        self.spawned += 1
+        return passenger
+
+    def passengers(self):
+        return self.agents.select(agent_type=Passenger)
+
+    # --- Statistics -----------------------------------------------------------
+
+    def record_trip(self, wait, ride, direct_time, shared):
+        """Called by a passenger at the end of the trip."""
+        self.trips.append({"wait": wait, "ride": ride,
+                           "detour": ride / direct_time, "shared": shared})
+
+    def count(self, *states):
+        return sum(p.state in states for p in self.passengers())
+
+    def average(self, key):
+        return sum(t[key] for t in self.trips) / len(self.trips) if self.trips else 0
+
+    def vehicle_km(self):
+        return sum(taxi.km for taxi in self.taxis())
+
     # --- Scheduling -----------------------------------------------------------
 
     def step(self):
-        """One step of the synchronous runtime: every taxi acts once (random order)."""
+        """One step of the synchronous runtime.
+
+        Passengers act first (call, accept), then taxis (answer, drive), each
+        group in random order. One round of the protocol takes one step.
+        """
+        self.spawn_passengers()
+        self.passengers().shuffle_do("step")
         self.taxis().shuffle_do("step")
         self.datacollector.collect(self)
 
 
 if __name__ == "__main__":
-    # Follow one taxi: it moves one road cell every `crossing_time` steps.
-    model = CityModel(n_taxis=1, crossing_time=2, seed=1)
-    taxi = model.taxis().to_list()[0]
+    model = CityModel(seed=1)
     print(f"city: {model.size} x {model.size} districts, grid {model.grid.width} x "
-          f"{model.grid.height} cells, {len(model.roads)} road cells")
-    for _ in range(12):
+          f"{model.grid.height} cells, {len(model.taxis())} taxis")
+    for _ in range(200):
         model.step()
-        print(f"step {model.steps:2}: taxi on {taxi.pos} (road: {taxi.pos in model.is_road}), "
-              f"target {taxi.target}, km {taxi.km}")
+    data = model.datacollector.get_model_vars_dataframe().iloc[-1]
+    print(f"after {model.steps} steps: {model.spawned} passengers, {int(data['Served'])} served")
+    print(f"avg wait {data['Avg wait']:.1f} steps, avg ride {data['Avg ride']:.1f} steps, "
+          f"avg detour {data['Avg detour']:.2f}, km per passenger {data['Km per passenger']:.1f}")
