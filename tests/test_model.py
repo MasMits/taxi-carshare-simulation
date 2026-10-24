@@ -85,7 +85,7 @@ class PassengerTests(unittest.TestCase):
         self.assertEqual(len(model.passengers()), 0)
 
     def test_single_rides_have_no_detour(self):
-        model = self.run_model()
+        model = self.run_model(capacity=1)
         self.assertGreater(len(model.trips), 0)
         for trip in model.trips:
             self.assertEqual(trip["detour"], 1.0)
@@ -97,12 +97,52 @@ class PassengerTests(unittest.TestCase):
                          len(model.trips) + len(model.passengers()))
 
     def test_taxi_carries_one_passenger_at_a_time(self):
-        model = CityModel(seed=4, demand=1.5)
+        model = CityModel(seed=4, demand=1.5, capacity=1)
         for _ in range(200):
             model.step()
             for taxi in model.taxis():
                 self.assertLessEqual(len(taxi.onboard), 1)
 
+
+class SharingTests(unittest.TestCase):
+    def run_model(self, steps=200, **params):
+        model = CityModel(seed=5, demand=1.5, capacity=2, allow_detour=False, **params)
+        for _ in range(steps):
+            model.step()
+            for taxi in model.taxis():
+                self.assertLessEqual(taxi.booked(), 2)  # never overbooked
+        return model
+
+    def test_two_seats_without_detours_share_some_trips(self):
+        model = self.run_model()
+        self.assertTrue(any(trip["shared"] for trip in model.trips))
+
+    def test_shared_rides_stay_within_tolerance(self):
+        model = self.run_model()
+        for trip in model.trips:
+            self.assertLessEqual(trip["detour"], model.max_detour + 1e-9)
+
+    def taxi_on_bottom_road(self, allow_detour):
+        """One taxi at (0, 0) driving a passenger to (24, 0), along the bottom road."""
+        model = CityModel(n_taxis=1, demand=0, capacity=2, allow_detour=allow_detour, seed=1)
+        taxi = model.taxis().to_list()[0]
+        model.grid.move_agent(taxi, (0, 0))
+        first = model.add_passenger((0, 0), (24, 0))
+        taxi.plan = taxi.best_insertion(first.trip(), first)[1]
+        return model, taxi
+
+    def test_passenger_on_the_route_can_join(self):
+        model, taxi = self.taxi_on_bottom_road(allow_detour=False)
+        second = model.add_passenger((4, 0), (12, 0))
+        self.assertIsNotNone(taxi.best_insertion(second.trip(), second))
+
+    def test_passenger_off_the_route_needs_a_detour(self):
+        model, taxi = self.taxi_on_bottom_road(allow_detour=False)
+        second = model.add_passenger((0, 4), (12, 0))
+        self.assertIsNone(taxi.best_insertion(second.trip(), second))
+        model, taxi = self.taxi_on_bottom_road(allow_detour=True)
+        second = model.add_passenger((0, 4), (12, 0))
+        self.assertIsNotNone(taxi.best_insertion(second.trip(), second))
 
 if __name__ == "__main__":
     unittest.main()

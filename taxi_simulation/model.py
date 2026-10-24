@@ -40,9 +40,9 @@ class CityModel(mesa.Model):
     """
 
     def __init__(self, size=6, district_size=3, n_taxis=10, capacity=2,
-                 allow_detour=True, demand=0.6, taxi_steps_per_cell=1, boarding_time=1,
+                 allow_detour=False, demand=0.6, taxi_steps_per_cell=1, boarding_time=1,
                  max_detour=1.5, seed=None):
-        super().__init__(rng=seed)  # `seed=` is deprecated since Mesa 3.5
+        super().__init__(rng=seed)
         self.size = size
         self.district_size = district_size
         self.capacity = capacity

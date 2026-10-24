@@ -132,11 +132,14 @@ class Stop:
 class Taxi(MessageAgent):
     """A taxi driving along the roads. Participant of the contract net.
 
-    A taxi carries one passenger at a time: it only makes offers while it is free.
+    A taxi takes up to `capacity` passengers. For each call it looks for the
+    cheapest way to insert the new pickup and drop-off into its plan, without
+    making anyone's ride longer than they accept.
 
     Beliefs:
         plan: stops still to visit, in order.
         onboard: passenger -> step when they are fully on board.
+        shared: passengers who shared the taxi during their ride.
         boarding, boarding_left: passenger getting in, and steps still needed.
         progress: steps already spent on the current road cell.
         km, km_empty: road cells driven, in total and with nobody on board.
@@ -153,9 +156,6 @@ class Taxi(MessageAgent):
         self.km = 0
         self.km_empty = 0
 
-    def is_free(self):
-        return not self.plan and not self.onboard
-
     def step(self):
         messages = self.receive()       # perceive
         action = self.decide(messages)  # deliberate
@@ -164,30 +164,86 @@ class Taxi(MessageAgent):
     def decide(self, messages):
         # Accepts first: they change the plan the next answers depend on.
         for msg in sorted(messages, key=lambda m: m.performative != ACCEPT):
+            if msg.performative not in (ACCEPT, CFP):
+                continue  # REJECT: nothing to undo, taxis keep no reservation
+            best = self.best_insertion(msg.content, msg.sender)
             if msg.performative == ACCEPT:
-                if self.is_free():
-                    trip = msg.content
-                    self.plan = [Stop(trip["pickup"], PICKUP, msg.sender, trip["max_ride"]),
-                                 Stop(trip["dropoff"], DROPOFF, msg.sender, trip["max_ride"])]
+                if best:
+                    self.plan = best[1]
                 else:
-                    self.send(msg.sender, FAILURE)
-            elif msg.performative == CFP:
-                if self.is_free():
-                    trip = msg.content
-                    self.send(msg.sender, PROPOSE, {
-                        "pickup_eta": self.model.travel_time(self.pos, trip["pickup"])
-                                      + self.model.boarding_time,
-                        "ride": self.model.travel_time(trip["pickup"], trip["dropoff"]),
-                    })
-                else:
-                    self.send(msg.sender, REFUSE)
-            # REJECT: nothing to undo, taxis keep no reservation
+                    self.send(msg.sender, FAILURE)  # the plan changed since the offer
+            elif best:
+                pickup_t, dropoff_t = best[2]
+                self.send(msg.sender, PROPOSE,
+                          {"pickup_eta": pickup_t, "ride": dropoff_t - pickup_t})
+            else:
+                self.send(msg.sender, REFUSE)
 
         if self.boarding_left > 0:
             return BOARD
         if self.plan and self.plan[0].cell == self.pos:
             return SERVE
         return DRIVE if self.plan else WAIT
+
+    # --- Planning ---------------------------------------------------------------
+
+    def booked(self):
+        """Passengers on board or waiting for this taxi."""
+        return len(self.onboard) + sum(stop.kind == PICKUP for stop in self.plan)
+
+    def plan_distance(self, plan):
+        """Road cells to drive to visit all the stops of a plan."""
+        cells = [self.pos] + [stop.cell for stop in plan]
+        return sum(self.model.distance(a, b) for a, b in zip(cells, cells[1:]))
+
+    def evaluate(self, plan):
+        """Simulate a plan from the current road cell.
+
+        Returns (finish_time, times) with times[p] = (pickup_t, dropoff_t)
+        relative to now, or None if someone's ride would exceed their max_ride.
+        """
+        m = self.model
+        t, cell = self.boarding_left, self.pos
+        picked = {p: step - m.steps for p, step in self.onboard.items()}  # already (getting) in
+        times = {}
+        for stop in plan:
+            t += m.travel_time(cell, stop.cell)
+            cell = stop.cell
+            if stop.kind == PICKUP:
+                t += m.boarding_time  # everyone inside waits while a new passenger gets in
+                picked[stop.passenger] = t
+            elif t - picked[stop.passenger] > stop.max_ride:
+                return None  # too long a ride for this passenger
+            else:
+                times[stop.passenger] = (picked[stop.passenger], t)
+        return t, times
+
+    def best_insertion(self, trip, passenger):
+        """Cheapest feasible plan that also serves the new trip.
+
+        The pickup goes at position i, the drop-off at position j >= i; the
+        existing stops keep their order. Without detours, the new passenger
+        must be on the current route. Returns (finish_time, plan,
+        (pickup_t, dropoff_t)) or None.
+        """
+        if self.booked() >= self.model.capacity:
+            return None
+        pickup = Stop(trip["pickup"], PICKUP, passenger, trip["max_ride"])
+        dropoff = Stop(trip["dropoff"], DROPOFF, passenger, trip["max_ride"])
+        old_distance = self.plan_distance(self.plan)
+        best = None
+        for i in range(len(self.plan) + 1):
+            for j in range(i, len(self.plan) + 1):
+                plan = self.plan[:i] + [pickup] + self.plan[i:j] + [dropoff] + self.plan[j:]
+                if (self.plan and not self.model.allow_detour
+                        and self.plan_distance(plan) > old_distance):
+                    continue  # the current route may not change
+                result = self.evaluate(plan)
+                if result is not None and (best is None or result[0] < best[0]):
+                    best = (result[0], plan, result[1][passenger])
+        return best
+
+    # --- Acting -----------------------------------------------------------------
 
     def act(self, action):
         if action == BOARD:
