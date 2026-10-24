@@ -2,7 +2,7 @@
 
 import matplotlib.pyplot as plt
 import mesa.visualization.solara_viz as solara_viz
-from mesa.visualization import SolaraViz, SpaceRenderer
+from mesa.visualization import SolaraViz, SpaceRenderer, make_plot_component
 from mesa.visualization.components import AgentPortrayalStyle, PropertyLayerStyle
 
 from taxi_simulation.agents import DROPOFF, WAITING, Taxi
@@ -16,7 +16,8 @@ ROUTE_COLORS = plt.get_cmap("tab10").colors
 
 def big_layout(num_components):
     """Bigger panels than Mesa's default (half width, 10 rows high), so the map is readable."""
-    return [{"i": i, "w": 7, "h": 16, "moved": False, "x": 0, "y": 16 * i}
+    return [{"i": i, "w": 7 if i == 0 else 5, "h": 16 if i == 0 else 8,
+             "moved": False, "x": 0 if i == 0 else 7, "y": 0 if i == 0 else 8 * (i - 1)}
             for i in range(num_components)]
 
 
@@ -35,14 +36,26 @@ def agent_portrayal(agent):
     if isinstance(agent, Taxi):
         # yellow = free, orange = one passenger, red = shared
         color = {0: "gold", 1: "tab:orange"}.get(len(agent.onboard), "tab:red")
-        return AgentPortrayalStyle(x=x + spread(agent), y=y + spread(agent), color=color,
-                                   marker="s", size=80, zorder=3,
-                                   edgecolors="black", linewidths=0.8)
+        dx, dy = taxi_offset(agent)
+        marker = {(1, 0): ">", (-1, 0): "<", (0, 1): "^", (0, -1): "v"}.get(agent.heading, "s")
+        return AgentPortrayalStyle(x=x + dx, y=y + dy, color=color,
+                                   marker=marker if agent.in_traffic else "s", size=80, zorder=3,
+                                   edgecolors="magenta" if agent.blocked else "black",
+                                   linewidths=2 if agent.blocked else 0.8)
     # blue = calling a taxi, green = a taxi is coming
     return AgentPortrayalStyle(x=x + spread(agent), y=y - spread(agent),
                                color="tab:blue" if agent.state == WAITING else "tab:green",
                                marker="o", size=45, zorder=2,
                                edgecolors="white", linewidths=0.5)
+
+
+def taxi_offset(taxi):
+    """Right-hand lanes; parked cars sit at the curb."""
+    if taxi.heading is None:
+        return spread(taxi), 0.35
+    dx, dy = taxi.heading
+    offset = 0.18 if taxi.in_traffic else 0.38
+    return dy * offset, -dx * offset
 
 
 def draw_rides(ax, grid):
@@ -57,20 +70,22 @@ def draw_rides(ax, grid):
         last = max(i for i, stop in enumerate(taxi.plan)
                    if stop.kind == DROPOFF and stop.passenger in taxi.onboard)
         stops = taxi.plan[:last + 1]
-        route, cell = [taxi.pos], taxi.pos
-        for stop in stops:
-            while cell != stop.cell:
-                cell = taxi.model.next_cell(cell, stop.cell)
-                route.append(cell)
+        route, cell, heading = [taxi.pos], taxi.pos, taxi.heading
+        for i, stop in enumerate(stops):
+            leg = taxi.route_to(stop.cell, cell, heading, first=i == 0)
+            if leg:
+                heading = taxi.model.direction(leg[-2] if len(leg) > 1 else cell, leg[-1])
+            route.extend(leg)
+            cell = stop.cell
 
         color = ROUTE_COLORS[taxi.unique_id % len(ROUTE_COLORS)]
-        d = spread(taxi)  # same offset as the taxi, so routes on one road stay apart
+        dx, dy = taxi_offset(taxi)
         xs, ys = zip(*route)
-        ax.plot([x + d for x in xs], [y + d for y in ys], color=color,
+        ax.plot([x + dx for x in xs], [y + dy for y in ys], color=color,
                 linewidth=2.5, linestyle="--", alpha=0.9, zorder=2.5)
         for stop in stops:
             if stop.kind == DROPOFF and stop.passenger in taxi.onboard:
-                ax.plot(stop.cell[0] + d, stop.cell[1] + d, marker="X", markersize=11,
+                ax.plot(stop.cell[0] + dx, stop.cell[1] + dy, marker="X", markersize=11,
                         color=color, markeredgecolor="black", markeredgewidth=0.6, zorder=2.6)
 
 
@@ -86,7 +101,8 @@ def post_process(ax):
     fig.subplots_adjust(left=0.01, right=0.99, bottom=0.01, top=0.9)
     ax.set_title("Taxis: yellow = free, orange = 1 passenger, red = shared\n"
                  "Passengers: blue = calling a taxi, green = taxi coming\n"
-                 "Line: route of a taxi with passengers, X = where they get off", fontsize=11)
+                 "Arrows: direction; magenta border: blocked; squares: at curb\n"
+                 "Line: route, X = drop-off", fontsize=10)
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
@@ -103,13 +119,16 @@ model_params = {
                  "min": 1, "max": 2, "step": 1},
     "allow_detour": {"type": "Checkbox", "value": False,
                      "label": "Taxis may change their route to pick someone up"},
-    "demand": {"type": "SliderFloat", "value": 0.6, "label": "New passengers per step",
+    "demand": {"type": "SliderFloat", "value": 0.3, "label": "New passengers per step",
                "min": 0.1, "max": 2.0, "step": 0.1},
     "taxi_steps_per_cell": {"type": "SliderInt", "value": 1,
                             "label": "Taxi: steps per cell",
                             "min": 1, "max": 5, "step": 1},
     "boarding_time": {"type": "SliderInt", "value": 1, "label": "Pickup time (steps)",
                       "min": 0, "max": 3, "step": 1},
+    "max_wait": {"type": "SliderInt", "value": 60, "label": "Maximum wait before cancellation (steps)",
+                 "min": 10, "max": 180, "step": 10},
+    "traffic": {"type": "Checkbox", "value": True, "label": "Traffic: lanes and queues"},
     "seed": 42,  # fixed: Reset replays the same run
 }
 
@@ -138,7 +157,9 @@ renderer.render()
 page = SolaraViz(
     model,
     renderer,
-    components=[],
+    components=[make_plot_component({"Waiting": "tab:blue", "Riding": "tab:green",
+                                     "Blocked taxis": "magenta"}),
+                make_plot_component({"Served": "tab:green", "Gave up": "tab:red"})],
     model_params=model_params,
     name="Taxi carshare simulation",
     play_interval=200,

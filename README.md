@@ -9,6 +9,21 @@ along the shortest route; driving along one road cell takes `taxi_steps_per_cell
 Passengers appear on the roads and call taxis (call for proposals); each free taxi makes an
 offer, the passenger accepts the one that brings them to their destination earliest.
 
+## Waiting and traffic
+
+New requests arrive at **0.3 passengers/step**. They expire after **60 steps** if boarding hasn't started. Assigned taxis are notified of cancellations.
+
+**Traffic: lanes and queues** (default):
+- Road cells have one slot per direction; turns only at intersections.
+- Movement uses occupancy snapshots; cars wait if the lane ahead was occupied.
+- Junctions admit one car at a time if the exit is clear. Longest-waiting has priority.
+- Idle or boarding cars pull over and must merge back; they don't block traffic.
+- Magenta borders show blocked cars; squares show parked cars. `Traffic delay` is cumulative blocked steps.
+
+Arrival ETAs use free-flow times and heading constraints. Congestion may exceed detour limits. Turning traffic off also disables heading constraints. Gridlock can occur at very high density.
+
+Adjust **Maximum wait**, demand, taxis, and speed, then **Reset**. For more congestion, use a smaller city or more taxis.
+
 ## Install
 Python 3.12 or newer.
 ```

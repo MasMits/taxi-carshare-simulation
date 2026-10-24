@@ -7,12 +7,13 @@ they only exchange messages (contract net protocol).
 
 from dataclasses import dataclass
 
-from .messages import ACCEPT, CFP, FAILURE, INFORM, PROPOSE, REFUSE, REJECT, MessageAgent
+from .messages import ACCEPT, CANCEL, CFP, FAILURE, INFORM, PROPOSE, REFUSE, REJECT, MessageAgent
 
 # Passenger states
 WAITING = "waiting"
 ASSIGNED = "assigned"
 RIDING = "riding"
+BOARDING = "boarding"
 ARRIVED = "arrived"
 
 # Kinds of stop in a taxi plan
@@ -34,7 +35,7 @@ class Passenger(MessageAgent):
         request_step: step when the passenger appeared.
         direct_time: duration of the ride without any detour.
         max_ride: longest ride the passenger accepts.
-        state: WAITING, ASSIGNED, RIDING or ARRIVED.
+        state: WAITING, ASSIGNED, BOARDING, RIDING or ARRIVED.
         pickup_step, arrival_step: told by the taxi.
         shared: whether the taxi was shared during the ride.
     """
@@ -50,6 +51,7 @@ class Passenger(MessageAgent):
         self.pickup_step = None
         self.arrival_step = None
         self.shared = False
+        self.assigned_taxi = None
 
     def trip(self):
         """What the passenger tells the taxis."""
@@ -68,6 +70,9 @@ class Passenger(MessageAgent):
                 proposals.append(msg)
             elif msg.performative == FAILURE:
                 self.state = WAITING  # the taxi could not keep its offer
+                self.assigned_taxi = None
+            elif msg.performative == INFORM and msg.content["event"] == "boarding":
+                self.state = BOARDING
             elif msg.performative == INFORM and msg.content["event"] == "picked_up":
                 self.state = RIDING
                 self.pickup_step = msg.content["step"]
@@ -81,12 +86,16 @@ class Passenger(MessageAgent):
         """Return (action, chosen offer)."""
         if self.state == ARRIVED:
             return "leave", None
-        if self.state == RIDING:
+        if self.state in (RIDING, BOARDING):
             return ("get in", None) if self.pos is not None else ("wait", None)
+        if self.model.steps - self.request_step >= self.model.max_wait:
+            return "cancel", None
         if self.state == ASSIGNED:
             return "wait", None
 
-        acceptable = [p for p in proposals if p.content["ride"] <= self.max_ride]
+        remaining = self.model.max_wait - (self.model.steps - self.request_step)
+        acceptable = [p for p in proposals if p.content["ride"] <= self.max_ride
+                      and max(0, p.content["pickup_eta"] - self.model.boarding_time) <= remaining]
         if acceptable:
             # The best offer brings the passenger to the destination earliest.
             best = min(acceptable, key=lambda p: p.content["pickup_eta"] + p.content["ride"])
@@ -100,6 +109,14 @@ class Passenger(MessageAgent):
                 if proposal is not offer:
                     self.send(proposal.sender, REJECT, conversation_id=self.unique_id)
             self.state = ASSIGNED
+            self.assigned_taxi = offer.sender
+        elif action == "cancel":
+            if self.assigned_taxi is not None:
+                self.send(self.assigned_taxi, CANCEL, conversation_id=self.unique_id)
+            for proposal in proposals:
+                self.send(proposal.sender, REJECT, conversation_id=self.unique_id)
+            self.model.gave_up += 1
+            self.remove()
         elif action == "call":
             for taxi in self.model.taxi_directory():
                 self.send(taxi, CFP, self.trip(), self.unique_id)
@@ -134,7 +151,8 @@ class Taxi(MessageAgent):
 
     A taxi takes up to `capacity` passengers. For each call it looks for the
     cheapest way to insert the new pickup and drop-off into its plan, without
-    making anyone's ride longer than they accept.
+    making anyone's predicted ride longer than they accept. Traffic can add
+    unpredicted delay after an offer is accepted.
 
     Beliefs:
         plan: stops still to visit, in order.
@@ -155,15 +173,26 @@ class Taxi(MessageAgent):
         self.progress = 0
         self.km = 0
         self.km_empty = 0
+        self.heading = None
+        self.in_traffic = False
+        self.junction_exit = None
+        self.blocked = False
+        self.traffic_delay = 0
+        self.queue_wait = 0
 
     def step(self):
+        self.blocked = False
         messages = self.receive()       # perceive
         action = self.decide(messages)  # deliberate
         self.act(action)                # act
 
     def decide(self, messages):
-        # Accepts first: they change the plan the next answers depend on.
-        for msg in sorted(messages, key=lambda m: m.performative != ACCEPT):
+        # Cancellations free bookings before accepts and new proposals.
+        priority = {CANCEL: 0, ACCEPT: 1, CFP: 2}
+        for msg in sorted(messages, key=lambda m: priority.get(m.performative, 3)):
+            if msg.performative == CANCEL:
+                self.plan = [s for s in self.plan if s.passenger is not msg.sender]
+                continue
             if msg.performative not in (ACCEPT, CFP):
                 continue  # REJECT: nothing to undo, taxis keep no reservation
             best = self.best_insertion(msg.content, msg.sender)
@@ -185,6 +214,23 @@ class Taxi(MessageAgent):
             return SERVE
         return DRIVE if self.plan else WAIT
 
+    def park(self):
+        """Pull over; retain heading so restarting cannot reverse mid-block."""
+        self.in_traffic = False
+        self.junction_exit = None
+        self.progress = 0
+        self.queue_wait = 0
+
+    def route_to(self, target, cell=None, heading=None, first=True):
+        """Include any exit already reserved while traversing a junction."""
+        cell = self.pos if cell is None else cell
+        heading = self.heading if heading is None and first else heading
+        if first and self.junction_exit is not None:
+            exit_cell = self.junction_exit
+            direction = self.model.direction(cell, exit_cell)
+            return (exit_cell,) + self.model.route(exit_cell, target, direction)
+        return self.model.route(cell, target, heading)
+
     # --- Planning ---------------------------------------------------------------
 
     def booked(self):
@@ -193,8 +239,14 @@ class Taxi(MessageAgent):
 
     def plan_distance(self, plan):
         """Road cells to drive to visit all the stops of a plan."""
-        cells = [self.pos] + [stop.cell for stop in plan]
-        return sum(self.model.distance(a, b) for a, b in zip(cells, cells[1:]))
+        distance, cell, heading = 0, self.pos, self.heading
+        for i, stop in enumerate(plan):
+            route = self.route_to(stop.cell, cell, heading, first=i == 0)
+            if route:
+                heading = self.model.direction(route[-2] if len(route) > 1 else cell, route[-1])
+            distance += len(route)
+            cell = stop.cell
+        return distance
 
     def evaluate(self, plan):
         """Simulate a plan from the current road cell.
@@ -206,8 +258,12 @@ class Taxi(MessageAgent):
         t, cell = self.boarding_left, self.pos
         picked = {p: step - m.steps for p, step in self.onboard.items()}  # already (getting) in
         times = {}
-        for stop in plan:
-            t += m.travel_time(cell, stop.cell)
+        heading = self.heading
+        for i, stop in enumerate(plan):
+            route = self.route_to(stop.cell, cell, heading, first=i == 0)
+            t += m.taxi_steps_per_cell * len(route)
+            if route:
+                heading = m.direction(route[-2] if len(route) > 1 else cell, route[-1])
             cell = stop.cell
             if stop.kind == PICKUP:
                 t += m.boarding_time  # everyone inside waits while a new passenger gets in
@@ -256,12 +312,12 @@ class Taxi(MessageAgent):
         elif action == DRIVE:
             # Driving along a road cell takes `taxi_steps_per_cell` steps,
             # then the taxi moves to the next one.
-            self.progress += 1
+            self.progress = min(self.progress + 1, self.model.taxi_steps_per_cell)
             if self.progress >= self.model.taxi_steps_per_cell:
-                self.progress = 0
-                self.model.grid.move_agent(self, self.model.next_cell(self.pos, self.plan[0].cell))
-                self.count_km()
-                self.serve_stops_here()
+                nxt = self.route_to(self.plan[0].cell)[0]
+                self.model.request_move(self, nxt)
+        if not self.plan or self.boarding_left:
+            self.park()
 
     def serve_stops_here(self):
         """Serve the stops on this cell in plan order.
@@ -282,6 +338,7 @@ class Taxi(MessageAgent):
                     self.shared.update(self.onboard)
                 self.boarding = stop.passenger
                 self.boarding_left = self.model.boarding_time
+                self.send(stop.passenger, INFORM, {"event": "boarding", "step": self.model.steps})
                 self.progress = 0
                 if self.boarding_left == 0:
                     self.finish_boarding()

@@ -1,4 +1,4 @@
-mesa>=3.5,<4
+mesa[viz,network]>=3.5,<4
 solara>=1.40,<2
 ipyvuetify>=1.9,<2
 matplotlib>=3.8,<4

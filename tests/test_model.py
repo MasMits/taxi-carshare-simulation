@@ -85,7 +85,7 @@ class PassengerTests(unittest.TestCase):
         self.assertEqual(len(model.passengers()), 0)
 
     def test_single_rides_have_no_detour(self):
-        model = self.run_model(capacity=1)
+        model = self.run_model(capacity=1, traffic=False)
         self.assertGreater(len(model.trips), 0)
         for trip in model.trips:
             self.assertEqual(trip["detour"], 1.0)
@@ -94,7 +94,7 @@ class PassengerTests(unittest.TestCase):
     def test_every_passenger_is_accounted_for(self):
         model = self.run_model()
         self.assertEqual(model.spawned,
-                         len(model.trips) + len(model.passengers()))
+                         len(model.trips) + model.gave_up + len(model.passengers()))
 
     def test_taxi_carries_one_passenger_at_a_time(self):
         model = CityModel(seed=4, demand=1.5, capacity=1)
@@ -118,7 +118,8 @@ class SharingTests(unittest.TestCase):
         self.assertTrue(any(trip["shared"] for trip in model.trips))
 
     def test_shared_rides_stay_within_tolerance(self):
-        model = self.run_model()
+        # Free-flow planning guarantees a tolerance; actual queues can add delay.
+        model = self.run_model(traffic=False)
         for trip in model.trips:
             self.assertLessEqual(trip["detour"], model.max_detour + 1e-9)
 

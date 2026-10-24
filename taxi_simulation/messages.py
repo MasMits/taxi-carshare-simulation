@@ -16,6 +16,7 @@ ACCEPT = "accept-proposal"
 REJECT = "reject-proposal"
 FAILURE = "failure"
 INFORM = "inform"
+CANCEL = "cancel"
 
 
 @dataclass
