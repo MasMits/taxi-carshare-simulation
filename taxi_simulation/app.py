@@ -34,8 +34,8 @@ def agent_portrayal(agent):
     # matplotlib renderer fails when taxis and passengers are drawn together.
     x, y = agent.pos
     if isinstance(agent, Taxi):
-        # yellow = free, orange = one passenger, red = shared
-        color = {0: "gold", 1: "tab:orange"}.get(len(agent.onboard), "tab:red")
+        # yellow = free, orange = carrying passengers (the badge shows how many)
+        color = "tab:orange" if agent.onboard else "gold"
         dx, dy = taxi_offset(agent)
         marker = {(1, 0): ">", (-1, 0): "<", (0, 1): "^", (0, -1): "v"}.get(agent.heading, "s")
         return AgentPortrayalStyle(x=x + dx, y=y + dy, color=color,
@@ -89,6 +89,20 @@ def draw_rides(ax, grid):
                         color=color, markeredgecolor="black", markeredgewidth=0.6, zorder=2.6)
 
 
+def draw_passenger_counts(ax, grid):
+    """A small badge with the number of passengers next to every busy taxi."""
+    for text in list(ax.texts):  # Mesa clears the markers at each step, not the texts
+        text.remove()
+    for taxi in grid.agents:
+        if not isinstance(taxi, Taxi) or not taxi.onboard:
+            continue
+        dx, dy = taxi_offset(taxi)
+        ax.text(taxi.pos[0] + dx + 0.45, taxi.pos[1] + dy + 0.45, str(len(taxi.onboard)),
+                ha="center", va="center", fontsize=9, fontweight="bold", zorder=4,
+                bbox={"boxstyle": "circle,pad=0.2", "facecolor": "white",
+                      "edgecolor": "black", "linewidth": 0.6})
+
+
 def propertylayer_portrayal(layer):
     """Draw the map: grey roads between green districts."""
     return PropertyLayerStyle(colormap=TERRAIN_COLORS, vmin=0, vmax=2, alpha=1.0,
@@ -99,7 +113,7 @@ def post_process(ax):
     fig = ax.get_figure()
     fig.set_size_inches(8, 8.4)
     fig.subplots_adjust(left=0.01, right=0.99, bottom=0.01, top=0.9)
-    ax.set_title("Taxis: yellow = free, orange = 1 passenger, red = shared\n"
+    ax.set_title("Taxis: yellow = free, orange = busy, (n) = passengers inside\n"
                  "Passengers: blue = calling a taxi, green = taxi coming\n"
                  "Arrows: direction; magenta border: blocked; squares: at curb\n"
                  "Line: route, X = drop-off", fontsize=10)
@@ -116,7 +130,7 @@ model_params = {
     "n_taxis": {"type": "SliderInt", "value": 10, "label": "Taxis",
                 "min": 1, "max": 40, "step": 1},
     "capacity": {"type": "SliderInt", "value": 2, "label": "Seats per taxi (1 = no sharing)",
-                 "min": 1, "max": 2, "step": 1},
+                 "min": 1, "max": 4, "step": 1},
     "allow_detour": {"type": "Checkbox", "value": False,
                      "label": "Taxis may change their route to pick someone up"},
     "demand": {"type": "SliderFloat", "value": 0.3, "label": "New passengers per step",
@@ -142,6 +156,7 @@ class CityRenderer(SpaceRenderer):
     def draw_agents(self, *args, **kwargs):
         result = super().draw_agents(*args, **kwargs)
         draw_rides(self.canvas, self.space)
+        draw_passenger_counts(self.canvas, self.space)
         return result
 
 

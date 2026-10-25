@@ -67,9 +67,15 @@ def render_map(model):
         title = svg("title", f"Taxi {taxi.unique_id}: {len(taxi.onboard)} on board, "
                     f"{taxi.traffic_delay} blocked steps" + ("" if taxi.in_traffic else " (at curb)"))
         parts.append(svg("g", title + shape, transform=f"translate({x},{y}) rotate({angle if taxi.in_traffic else 0})",
-                         fill={0: "#f4ca33", 1: "#f08c28"}.get(len(taxi.onboard), "#df4b3f"),
+                         fill="#f08c28" if taxi.onboard else "#f4ca33",
                          stroke="#d81bce" if taxi.blocked else "#353535",
                          stroke_width=.14 if taxi.blocked else .06))
+        if taxi.onboard:  # badge with the number of passengers inside
+            parts.append(svg("circle", cx=x + .5, cy=y - .5, r=.38, fill="white",
+                             stroke="#353535", stroke_width=.06))
+            parts.append(svg("text", str(len(taxi.onboard)), x=x + .5, y=y - .35,
+                             text_anchor="middle", font_size=.46, font_weight="bold",
+                             fill="#202020", stroke="none"))
     for x, y, text in model.map_labels:
         parts.append(svg("text", escape(text), x=x, y=-y, text_anchor="middle", font_size=.65, fill="#354335"))
     return svg("svg", svg("title", escape(model.map_title)) + "".join(parts),
@@ -85,7 +91,7 @@ def GraphMap(model):
                     f"Served: **{len(model.trips)}** · Cancelled: **{model.gave_up}** · "
                     f"Blocked taxis: **{sum(t.blocked for t in model.taxis())}**")
     solara.HTML(tag="div", unsafe_innerHTML=render_map(model))
-    solara.Markdown("Yellow: empty · Orange: 1 passenger · Red: shared · Magenta border: blocked  \n"
+    solara.Markdown("Yellow: empty · Orange: busy · (n): passengers inside · Magenta border: blocked  \n"
                     "Blue / green dots: passengers · Dashed line: ride route · ×: drop-off  \n"
                     "Two directional lanes per road; squares wait at the curb.")
 
