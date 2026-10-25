@@ -35,13 +35,49 @@ python -m pip install -r requirements.txt
 |---|---|
 | Web interface (opens in the browser) | `python main.py` |
 | Same, directly with Solara | `solara run taxi_simulation.app` |
+| Ring-road graph demo | `solara run taxi_simulation.ring_app --port 8766` |
+| Irregular graph-city demo | `solara run taxi_simulation.irregular_app --port 8767` |
 | Quick text check, no interface | `python -m taxi_simulation.model` |
 | Tests | `python -m unittest discover tests` |
 
 In the interface: press **▶** to run, **Step** for one step. After moving a slider, press **Reset**.
 
+## Ring-road graph demo
+
+Open the separate ring demo to see the same simulation on two circular roads with radial streets.
+It uses Mesa `NetworkGrid` over a NetworkX graph, rather than a rectangular grid. Junctions are
+connected by road sections subdivided into traffic slots, with separate lanes in each direction.
+The graph determines movement; drawing coordinates only determine the shape on screen.
+The same taxi/passenger agents handle calls, sharing, queues and request cancellation.
+
+Change **Radial streets** and press **Reset** to rebuild the city. Capacity can range from 1 to 4.
+Triangles show moving taxis, squares show taxis at the curb, and a magenta border marks blocked
+cars. Blue/green dots are waiting/assigned passengers; dashed lines show occupied taxi routes.
+The map updates from the actual model, alongside the passenger and traffic charts.
+
+This is a graph-city prototype: each road slot has equal free-flow travel cost (roughly 1.5
+drawing units), and route planning does not yet predict congestion. The standard grid demo
+and its launch command remain available for comparison.
+
 If the page shows only the controls and no map, an incompatible `ipyvuetify` is installed:
 run `python -m pip install "ipyvuetify<2"` and restart.
+
+## Irregular city demo
+
+The irregular demo generates scattered junctions, streets of different lengths, loops,
+T-junctions and dead ends. A minimum spanning tree keeps every junction reachable; extra
+roads are added without crossing existing roads. It uses the same agents, lanes, traffic
+queues, cancellations, route drawing and charts as the ring demo.
+
+Change **City layout seed** to generate another city, **Junctions** to change its size, or
+**Additional road probability** for more alternative routes, then press **Reset**. The map
+seed is separate from the simulation seed, so changing agent randomness does not rebuild
+the street layout. Both graph demos share their road-space and rendering code.
+
+Both launch modules only select a model and its map controls. `graph_page` in
+`graph_view.py` supplies the shared controls, map and charts; `RoadGraphModel`
+supplies common model defaults. The two city classes contain only map settings
+and generation, forwarding simulation parameters to the shared model.
 
 ## Files
 ```
@@ -50,5 +86,11 @@ taxi_simulation/model.py    CityModel: the city (environment), scheduler, statis
 taxi_simulation/agents.py   the agents: Passenger and Taxi
 taxi_simulation/messages.py messages between agents (contract net protocol)
 taxi_simulation/app.py      SolaraViz interface
+taxi_simulation/ring_model.py Graph city: circular roads and radial streets
+taxi_simulation/ring_app.py   Live ring-road demo
+taxi_simulation/irregular_model.py Seeded irregular street generator
+taxi_simulation/irregular_app.py Live irregular-city demo
+taxi_simulation/graph_model.py Shared graph road space and directional slots
+taxi_simulation/graph_view.py  Shared graph-city visualization
 tests/                      unit tests
 ```

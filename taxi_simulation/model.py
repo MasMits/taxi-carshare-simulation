@@ -59,23 +59,7 @@ class CityModel(mesa.Model):
         self.traffic = traffic
         self._move_requests = {}
 
-        # A road every `block` cells, including the city border.
-        self.block = district_size + 1
-        width = size * self.block + 1
-        self.terrain = PropertyLayer("terrain", width, width, ROAD, dtype=int)
-        self.grid = MultiGrid(width, width, torus=False, property_layers=[self.terrain])
-
-        self.roads = []  # every cell a taxi may drive on
-        for x in range(width):
-            for y in range(width):
-                district = self.district_at((x, y))
-                if district is None:
-                    self.roads.append((x, y))
-                else:
-                    col, row = district % size, district // size
-                    self.terrain.set_cell(
-                        (x, y), DISTRICT_A if (col + row) % 2 == 0 else DISTRICT_B
-                    )
+        self.build_map()
         self.is_road = set(self.roads)
         self._distances = {}  # target -> {road cell: road distance to target}
         self._routes = {}
@@ -110,6 +94,24 @@ class CityModel(mesa.Model):
         self.datacollector.collect(self)
 
     # --- Map ------------------------------------------------------------------
+
+    def build_map(self):
+        """Build the default rectangular city; other road networks override this."""
+        self.block = self.district_size + 1
+        width = self.size * self.block + 1
+        self.terrain = PropertyLayer("terrain", width, width, ROAD, dtype=int)
+        self.grid = MultiGrid(width, width, torus=False, property_layers=[self.terrain])
+        self.roads = []
+        for x in range(width):
+            for y in range(width):
+                district = self.district_at((x, y))
+                if district is None:
+                    self.roads.append((x, y))
+                else:
+                    col, row = district % self.size, district // self.size
+                    self.terrain.set_cell(
+                        (x, y), DISTRICT_A if (col + row) % 2 == 0 else DISTRICT_B
+                    )
 
     def district_at(self, cell):
         """District id of a cell, or None if the cell is a road."""
@@ -172,7 +174,7 @@ class CityModel(mesa.Model):
             cells, cell = [], start
             while cell != target:
                 nxt = self.next_cell(cell, target, heading)
-                heading = (nxt[0] - cell[0], nxt[1] - cell[1])
+                heading = self.direction(cell, nxt)
                 cells.append(nxt)
                 cell = nxt
             self._routes[key] = tuple(cells)
