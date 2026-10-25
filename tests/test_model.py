@@ -145,5 +145,34 @@ class SharingTests(unittest.TestCase):
         second = model.add_passenger((0, 4), (12, 0))
         self.assertIsNotNone(taxi.best_insertion(second.trip(), second))
 
+class PollutionTests(unittest.TestCase):
+    def test_driving_emits_co2_per_km(self):
+        model = CityModel(n_taxis=1, demand=0, cell_km=0.5, co2_per_km=100, seed=1)
+        taxi = model.taxis().to_list()[0]
+        taxi.count_km()
+        taxi.count_km()
+        self.assertEqual(taxi.co2, 2 * 0.5 * 100)
+
+    def test_stuck_in_traffic_emits_co2(self):
+        model = CityModel(n_taxis=1, demand=0, idle_co2_per_step=30, seed=1)
+        taxi = model.taxis().to_list()[0]
+        taxi.count_idle()
+        self.assertEqual(taxi.co2, 30)
+
+    def test_fleet_co2_matches_km_and_traffic_delay(self):
+        model = CityModel(seed=2, demand=1.0)
+        for _ in range(200):
+            model.step()
+        expected = (model.vehicle_km() * model.cell_km * model.co2_per_km
+                    + sum(t.traffic_delay for t in model.taxis()) * model.idle_co2_per_step)
+        self.assertAlmostEqual(model.co2(), expected)
+
+    def test_parked_taxis_do_not_emit(self):
+        model = CityModel(n_taxis=3, demand=0, seed=1)
+        for _ in range(20):
+            model.step()
+        self.assertEqual(model.co2(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ Quick check:  python -m taxi_simulation.model
 from collections import deque
 
 import mesa
+import numpy as np
 from mesa.space import MultiGrid, PropertyLayer
 
 from .agents import ASSIGNED, BOARDING, RIDING, WAITING, Passenger, Taxi
@@ -38,13 +39,22 @@ class CityModel(mesa.Model):
         max_detour: accepted ride <= max_detour * direct time.
         max_wait: cancel an uncollected request after this many steps.
         traffic: enforce directional lanes and junction reservations.
+        cell_km: length of one road cell, in km.
+        co2_per_km: CO2 a taxi emits per km driven, in grams.
+        idle_co2_per_step: CO2 a taxi emits per step while stuck in traffic, in grams.
+        stop_at: the simulation stops at this step (0 = never), so runs can be compared.
         seed: random seed (reproducible runs).
     """
 
     def __init__(self, size=6, district_size=3, n_taxis=10, capacity=2,
                  allow_detour=False, demand=0.3, taxi_steps_per_cell=1, boarding_time=1,
-                 max_detour=1.5, max_wait=60, traffic=True, seed=None):
+                 max_detour=1.5, max_wait=60, traffic=True,
+                 cell_km=0.25, co2_per_km=150, idle_co2_per_step=25, stop_at=1000, seed=None):
         super().__init__(rng=seed)
+        # Passenger requests have their own random generator: with the same seed,
+        # every run gets the same passengers, whatever the taxis do. Runs with
+        # 1 to 4 seats per taxi can then be compared fairly.
+        self.demand_rng = np.random.default_rng(seed)
         if max_wait <= 0 or taxi_steps_per_cell < 1 or boarding_time < 0:
             raise ValueError("max_wait and taxi_steps_per_cell must be positive; boarding_time nonnegative")
         self.size = size
@@ -57,6 +67,10 @@ class CityModel(mesa.Model):
         self.max_detour = max_detour
         self.max_wait = max_wait
         self.traffic = traffic
+        self.cell_km = cell_km
+        self.co2_per_km = co2_per_km
+        self.idle_co2_per_step = idle_co2_per_step
+        self.stop_at = stop_at
         self._move_requests = {}
 
         self.build_map()
@@ -90,6 +104,8 @@ class CityModel(mesa.Model):
             "Shared %": lambda m: 100 * m.average("shared"),
             "Empty km %": lambda m: 100 * sum(t.km_empty for t in m.taxis())
                                     / max(1, m.vehicle_km()),
+            "CO2 (kg)": lambda m: m.co2() / 1000,
+            "CO2 per passenger (g)": lambda m: m.co2() / max(1, len(m.trips)),
         })
         self.datacollector.collect(self)
 
@@ -222,6 +238,7 @@ class CityModel(mesa.Model):
                 taxi.blocked = True
                 taxi.traffic_delay += 1
                 taxi.queue_wait += 1
+                taxi.count_idle()
                 continue
             claimed.update(keys)
             self.grid.move_agent(taxi, nxt)
@@ -258,12 +275,16 @@ class CityModel(mesa.Model):
 
     def spawn_passengers(self):
         """New requests of this step (Poisson). Trips shorter than one block are walked."""
-        for _ in range(self.rng.poisson(self.demand)):
-            origin = self.random_road_cell()
-            destination = self.random_road_cell()
+        for _ in range(self.demand_rng.poisson(self.demand)):
+            origin = self.random_request_cell()
+            destination = self.random_request_cell()
             while self.distance(origin, destination) < self.block:
-                destination = self.random_road_cell()
+                destination = self.random_request_cell()
             self.add_passenger(origin, destination)
+
+    def random_request_cell(self):
+        """A random road cell for a passenger request (own generator, see __init__)."""
+        return self.roads[self.demand_rng.integers(len(self.roads))]
 
     def add_passenger(self, origin, destination):
         passenger = Passenger(self, origin, destination)
@@ -290,6 +311,14 @@ class CityModel(mesa.Model):
     def vehicle_km(self):
         return sum(taxi.km for taxi in self.taxis())
 
+    def co2(self):
+        """CO2 emitted by the whole fleet so far, in grams."""
+        return sum(taxi.co2 for taxi in self.taxis())
+
+    def driven_km(self):
+        """Kilometres driven by the whole fleet so far."""
+        return self.vehicle_km() * self.cell_km
+
     # --- Scheduling -----------------------------------------------------------
 
     def step(self):
@@ -304,6 +333,8 @@ class CityModel(mesa.Model):
         self.taxis().shuffle_do("step")
         self.resolve_traffic()
         self.datacollector.collect(self)
+        if self.stop_at and self.steps >= self.stop_at:
+            self.running = False  # the interface stops playing here
 
 
 if __name__ == "__main__":
@@ -316,3 +347,4 @@ if __name__ == "__main__":
     print(f"after {model.steps} steps: {model.spawned} passengers, {int(data['Served'])} served")
     print(f"avg wait {data['Avg wait']:.1f} steps, avg ride {data['Avg ride']:.1f} steps, "
           f"avg detour {data['Avg detour']:.2f}, km per passenger {data['Km per passenger']:.1f}")
+    print(f"CO2: {data['CO2 (kg)']:.1f} kg in total, {data['CO2 per passenger (g)']:.0f} g per passenger")

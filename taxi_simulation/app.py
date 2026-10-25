@@ -7,6 +7,7 @@ from mesa.visualization.components import AgentPortrayalStyle, PropertyLayerStyl
 
 from taxi_simulation.agents import DROPOFF, WAITING, Taxi
 from taxi_simulation.model import CityModel
+from taxi_simulation.stats_view import PollutionStats
 
 # Colors of the terrain layer: district A, district B, road.
 TERRAIN_COLORS = ["#cfe3c8", "#a9cf9c", "#9e9e9e"]
@@ -15,9 +16,11 @@ ROUTE_COLORS = plt.get_cmap("tab10").colors
 
 
 def big_layout(num_components):
-    """Bigger panels than Mesa's default (half width, 10 rows high), so the map is readable."""
-    return [{"i": i, "w": 7 if i == 0 else 5, "h": 16 if i == 0 else 8,
-             "moved": False, "x": 0 if i == 0 else 7, "y": 0 if i == 0 else 8 * (i - 1)}
+    """Page 0: map and statistics side by side. Page 1: the charts, two per row."""
+    if num_components == 2:
+        return [{"i": 0, "w": 7, "h": 16, "moved": False, "x": 0, "y": 0},
+                {"i": 1, "w": 5, "h": 11, "moved": False, "x": 7, "y": 0}]
+    return [{"i": i, "w": 6, "h": 10, "moved": False, "x": 6 * (i % 2), "y": 10 * (i // 2)}
             for i in range(num_components)]
 
 
@@ -140,10 +143,12 @@ model_params = {
                             "min": 1, "max": 5, "step": 1},
     "boarding_time": {"type": "SliderInt", "value": 1, "label": "Pickup time (steps)",
                       "min": 0, "max": 3, "step": 1},
-    "max_wait": {"type": "SliderInt", "value": 60, "label": "Maximum wait before cancellation (steps)",
+    "max_wait": {"type": "SliderInt", "value": 60, "label": "Max wait (steps)",
                  "min": 10, "max": 180, "step": 10},
     "traffic": {"type": "Checkbox", "value": True, "label": "Traffic: lanes and queues"},
-    "seed": 42,  # fixed: Reset replays the same run
+    "stop_at": {"type": "SliderInt", "value": 1000, "label": "Stop at step (0 = never)",
+                "min": 0, "max": 3000, "step": 100},
+    "seed": 42,  # fixed: Reset replays the same run, with the same passengers
 }
 
 class CityRenderer(SpaceRenderer):
@@ -172,9 +177,11 @@ renderer.render()
 page = SolaraViz(
     model,
     renderer,
-    components=[make_plot_component({"Waiting": "tab:blue", "Riding": "tab:green",
-                                     "Blocked taxis": "magenta"}),
-                make_plot_component({"Served": "tab:green", "Gave up": "tab:red"})],
+    components=[PollutionStats,
+                make_plot_component({"CO2 per passenger (g)": "tab:brown"}, page=1),
+                make_plot_component({"Waiting": "tab:blue", "Riding": "tab:green",
+                                     "Blocked taxis": "magenta"}, page=1),
+                make_plot_component({"Served": "tab:green", "Gave up": "tab:red"}, page=1)],
     model_params=model_params,
     name="Taxi carshare simulation",
     play_interval=200,

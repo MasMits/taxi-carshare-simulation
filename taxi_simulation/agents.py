@@ -161,6 +161,7 @@ class Taxi(MessageAgent):
         boarding, boarding_left: passenger getting in, and steps still needed.
         progress: steps already spent on the current road cell.
         km, km_empty: road cells driven, in total and with nobody on board.
+        co2: grams of CO2 emitted, by driving and by idling in traffic jams.
     """
 
     def __init__(self, model):
@@ -173,6 +174,7 @@ class Taxi(MessageAgent):
         self.progress = 0
         self.km = 0
         self.km_empty = 0
+        self.co2 = 0.0
         self.heading = None
         self.in_traffic = False
         self.junction_exit = None
@@ -347,6 +349,12 @@ class Taxi(MessageAgent):
         self.send(self.boarding, INFORM, {"event": "picked_up", "step": self.model.steps})
 
     def count_km(self):
+        """One road cell driven: count it and the CO2 it emits."""
         self.km += 1
         if not self.onboard:
             self.km_empty += 1
+        self.co2 += self.model.cell_km * self.model.co2_per_km
+
+    def count_idle(self):
+        """One step stuck in traffic: the engine runs without moving."""
+        self.co2 += self.model.idle_co2_per_step

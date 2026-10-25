@@ -9,6 +9,7 @@ from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
 
 from .agents import DROPOFF, WAITING
+from .stats_view import PollutionStats
 
 
 def svg(tag, content="", **attributes):
@@ -103,18 +104,27 @@ def slider(label, value, minimum, maximum, step=1):
 
 def graph_page(model_class, name, map_params):
     """Only the map controls differ between the two launch modules."""
-    solara_viz.make_initial_grid_layout = lambda count: [
-        {"i": i, "w": 7 if i == 0 else 5, "h": 17 if i == 0 else 8,
-         "moved": False, "x": 0 if i == 0 else 7, "y": 0 if i == 0 else 8 * (i - 1)} for i in range(count)]
+    def layout(count):
+        """Page 0: map and statistics side by side. Page 1: the charts, two per row."""
+        if count == 2:
+            return [{"i": 0, "w": 7, "h": 17, "moved": False, "x": 0, "y": 0},
+                    {"i": 1, "w": 5, "h": 11, "moved": False, "x": 7, "y": 0}]
+        return [{"i": i, "w": 6, "h": 10, "moved": False, "x": 6 * (i % 2), "y": 10 * (i // 2)}
+                for i in range(count)]
+
+    solara_viz.make_initial_grid_layout = layout
     params = {**map_params, "n_taxis": slider("Taxis", 16, 2, 40),
               "capacity": slider("Seats per taxi", 2, 1, 4),
               "allow_detour": {"type": "Checkbox", "value": True, "label": "Allow detours for sharing"},
               "demand": slider("New passengers per step", .3, .1, 2., .1),
               "taxi_steps_per_cell": slider("Steps per road slot", 1, 1, 5),
-              "max_wait": slider("Maximum wait (steps)", 60, 10, 180, 10),
-              "traffic": {"type": "Checkbox", "value": True, "label": "Traffic: lanes and queues"}, "seed": 42}
+              "max_wait": slider("Max wait (steps)", 60, 10, 180, 10),
+              "traffic": {"type": "Checkbox", "value": True, "label": "Traffic: lanes and queues"},
+              "stop_at": slider("Stop at step (0 = never)", 1000, 0, 3000, 100), "seed": 42}
     return SolaraViz(model_class(seed=42), model_params=params, name=name, play_interval=200,
-                     components=[GraphMap,
+                     components=[GraphMap, PollutionStats,
+                                 make_plot_component({"CO2 per passenger (g)": "tab:brown"}, page=1),
                                  make_plot_component({"Waiting": "tab:blue", "Riding": "tab:green",
-                                                      "Blocked taxis": "magenta"}),
-                                 make_plot_component({"Served": "tab:green", "Gave up": "tab:red"})])
+                                                      "Blocked taxis": "magenta"}, page=1),
+                                 make_plot_component({"Served": "tab:green", "Gave up": "tab:red"},
+                                                     page=1)])

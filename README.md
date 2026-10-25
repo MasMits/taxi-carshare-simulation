@@ -9,6 +9,28 @@ along the shortest route; driving along one road cell takes `taxi_steps_per_cell
 Passengers appear on the roads and call taxis (call for proposals); each free taxi makes an
 offer, the passenger accepts the one that brings them to their destination earliest.
 
+## Pollution
+
+Each taxi counts the CO2 it emits:
+- driving: every road cell costs `cell_km × co2_per_km` (defaults: 0.25 km, 150 g CO2/km);
+- stuck in traffic: every blocked step costs `idle_co2_per_step` (default 25 g, engine running);
+- parked at the curb: engine off, no emission.
+
+The model reports `CO2 (kg)` for the whole fleet and `CO2 per passenger (g)` (fleet CO2 / served
+passengers). Compare this second value for 1 seat (classic taxis) and 2+ seats (shared taxis).
+
+### Comparing 1 seat with 2-4 seats
+Passenger requests use their own random generator, so with the same seed every run gets exactly the
+same passengers, whatever the taxis do. Each run stops at **Stop at step** (default 1000).
+To finish faster, lower **Play Interval** or raise **Render Interval** (e.g. 10).
+1. Tick **Taxis may change their route to pick someone up** (otherwise 3-4 seats behave like 2).
+2. Set **Seats per taxi** to 1, press **Reset**, then **▶** and wait until the panel says *finished*.
+3. Screenshot the statistics panel (CO₂ per passenger, km, passengers served...).
+4. Repeat with 2, 3 and 4 seats, changing nothing else.
+
+With the default settings (seed 42, detours on, 1000 steps, ~314 passengers) CO₂ per passenger goes
+from about 1,410 g with 1 seat to 1,070 g with 2 seats and about 1,030-1,045 g with 3-4 seats.
+
 ## Waiting and traffic
 
 New requests arrive at **0.3 passengers/step**. They expire after **60 steps** if boarding hasn't started. Assigned taxis are notified of cancellations.
