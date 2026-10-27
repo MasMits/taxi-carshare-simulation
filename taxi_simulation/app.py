@@ -5,7 +5,7 @@ import mesa.visualization.solara_viz as solara_viz
 from mesa.visualization import SolaraViz, SpaceRenderer, make_plot_component
 from mesa.visualization.components import AgentPortrayalStyle, PropertyLayerStyle
 
-from taxi_simulation.agents import DROPOFF, WAITING, Taxi
+from taxi_simulation.agents import CONFIRMING, DROPOFF, WAITING, Taxi
 from taxi_simulation.model import CityModel
 from taxi_simulation.stats_view import PollutionStats
 
@@ -19,7 +19,7 @@ def big_layout(num_components):
     """Page 0: map and statistics side by side. Page 1: the charts, two per row."""
     if num_components == 2:
         return [{"i": 0, "w": 7, "h": 16, "moved": False, "x": 0, "y": 0},
-                {"i": 1, "w": 5, "h": 11, "moved": False, "x": 7, "y": 0}]
+                {"i": 1, "w": 5, "h": 18, "moved": False, "x": 7, "y": 0}]
     return [{"i": i, "w": 6, "h": 10, "moved": False, "x": 6 * (i % 2), "y": 10 * (i // 2)}
             for i in range(num_components)]
 
@@ -37,17 +37,18 @@ def agent_portrayal(agent):
     # matplotlib renderer fails when taxis and passengers are drawn together.
     x, y = agent.pos
     if isinstance(agent, Taxi):
-        # yellow = free, orange = carrying passengers (the badge shows how many)
-        color = "tab:orange" if agent.onboard else "gold"
+        # yellow = available, orange = assigned or carrying passengers
+        color = "tab:orange" if agent.plan or agent.onboard else "gold"
         dx, dy = taxi_offset(agent)
         marker = {(1, 0): ">", (-1, 0): "<", (0, 1): "^", (0, -1): "v"}.get(agent.heading, "s")
         return AgentPortrayalStyle(x=x + dx, y=y + dy, color=color,
                                    marker=marker if agent.in_traffic else "s", size=80, zorder=3,
                                    edgecolors="magenta" if agent.blocked else "black",
                                    linewidths=2 if agent.blocked else 0.8)
-    # blue = calling a taxi, green = a taxi is coming
+    # blue = searching, purple = awaiting confirmation, green = taxi coming
     return AgentPortrayalStyle(x=x + spread(agent), y=y - spread(agent),
-                               color="tab:blue" if agent.state == WAITING else "tab:green",
+                               color=("tab:blue" if agent.state == WAITING else
+                                      "tab:purple" if agent.state == CONFIRMING else "tab:green"),
                                marker="o", size=45, zorder=2,
                                edgecolors="white", linewidths=0.5)
 
@@ -75,7 +76,7 @@ def draw_rides(ax, grid):
         stops = taxi.plan[:last + 1]
         route, cell, heading = [taxi.pos], taxi.pos, taxi.heading
         for i, stop in enumerate(stops):
-            leg = taxi.route_to(stop.cell, cell, heading, first=i == 0)
+            leg = taxi.route_to_stop(taxi.plan, i, cell, heading, first=i == 0)
             if leg:
                 heading = taxi.model.direction(leg[-2] if len(leg) > 1 else cell, leg[-1])
             route.extend(leg)
@@ -116,8 +117,8 @@ def post_process(ax):
     fig = ax.get_figure()
     fig.set_size_inches(8, 8.4)
     fig.subplots_adjust(left=0.01, right=0.99, bottom=0.01, top=0.9)
-    ax.set_title("Taxis: yellow = free, orange = busy, (n) = passengers inside\n"
-                 "Passengers: blue = calling a taxi, green = taxi coming\n"
+    ax.set_title("Taxis: yellow = free, orange = assigned/busy, (n) = passengers inside\n"
+                 "Passengers: blue = searching, purple = confirming, green = taxi coming\n"
                  "Arrows: direction; magenta border: blocked; squares: at curb\n"
                  "Line: route, X = drop-off", fontsize=10)
     ax.set_aspect("equal")
@@ -143,8 +144,14 @@ model_params = {
                             "min": 1, "max": 5, "step": 1},
     "boarding_time": {"type": "SliderInt", "value": 1, "label": "Pickup time (steps)",
                       "min": 0, "max": 3, "step": 1},
-    "max_wait": {"type": "SliderInt", "value": 60, "label": "Max wait (steps)",
+    "max_wait": {"type": "SliderInt", "value": 60, "label": "Search timeout (steps)",
                  "min": 10, "max": 180, "step": 10},
+    "pickup_slack": {"type": "SliderInt", "value": 3, "label": "Pickup promise margin (steps)",
+                     "min": 0, "max": 10, "step": 1},
+    "wait_priority": {"type": "SliderFloat", "value": 0.5, "label": "Waiting passenger priority",
+                      "min": 0.0, "max": 2.0, "step": 0.1},
+    "offer_ttl": {"type": "SliderInt", "value": 6, "label": "Offer validity (steps)",
+                  "min": 1, "max": 15, "step": 1},
     "traffic": {"type": "Checkbox", "value": True, "label": "Traffic: lanes and queues"},
     "stop_at": {"type": "SliderInt", "value": 1000, "label": "Stop at step (0 = never)",
                 "min": 0, "max": 3000, "step": 100},

@@ -58,7 +58,11 @@ class IrregularCityTests(unittest.TestCase):
                         self.assertEqual(taxi.heading, heading)
                 self.assertLessEqual(taxi.booked(), model.capacity)
         self.assertGreater(len(model.trips), 0)
-        self.assertGreater(model.gave_up, 0)
+        # Correct approach directions can let every request get a booking.
+        self.assertGreater(model.confirmed_orders, 0)
+        for passenger in model.passengers():
+            if passenger.state in ('waiting', 'confirming'):
+                self.assertLess(model.steps - passenger.request_step, model.max_wait)
         self.assertGreater(sum(t.traffic_delay for t in model.taxis()), 0)
 
     def test_invalid_generator_settings_fail_explicitly(self):

@@ -2,7 +2,7 @@
 
 import unittest
 
-from taxi_simulation.agents import ASSIGNED, DROPOFF, RIDING, WAITING, Stop
+from taxi_simulation.agents import ASSIGNED, CONFIRMING, DROPOFF, RIDING, WAITING, Stop
 from taxi_simulation.model import CityModel
 
 
@@ -18,20 +18,21 @@ class CancellationTests(unittest.TestCase):
         self.assertIsNone(passenger.pos)
         self.assertEqual(model.gave_up, 1)
 
-    def test_assigned_cancellation_removes_all_stops(self):
-        model = CityModel(n_taxis=1, demand=0, max_wait=2, seed=1)
+    def test_confirmed_passenger_does_not_cancel_at_search_deadline(self):
+        model = CityModel(n_taxis=1, demand=0, max_wait=3, seed=1)
         taxi = model.taxis().to_list()[0]
         model.grid.move_agent(taxi, (0, 0))
-        passenger = model.add_passenger((20, 0), (24, 0))
-        taxi.plan = taxi.best_insertion(passenger.trip(), passenger)[1]
-        passenger.state = ASSIGNED
-        passenger.assigned_taxi = taxi
+        passenger = model.add_passenger((1, 0), (8, 0))
         model.step()
+        model.step()  # confirmed by taxi, confirmation is in the mailbox
+        self.assertEqual(passenger.state, CONFIRMING)
+        # Unexpected congestion after commitment cannot cancel the contract.
+        taxi.progress = 0
+        model.taxi_steps_per_cell = 10
         model.step()
-        self.assertEqual(taxi.plan, [])
-        self.assertEqual(taxi.booked(), 0)
-        self.assertFalse(taxi.in_traffic)
-        self.assertEqual(model.gave_up, 1)
+        self.assertIn(passenger, model.passengers())
+        self.assertIn(passenger.state, (ASSIGNED, "boarding"))
+        self.assertEqual(model.gave_up, 0)
 
     def test_boarding_passenger_does_not_cancel(self):
         model = CityModel(n_taxis=1, demand=0, max_wait=3, boarding_time=5, seed=1)
@@ -50,7 +51,7 @@ class CancellationTests(unittest.TestCase):
             model.step()
             self.assertEqual(model.spawned, len(model.trips) + model.gave_up + len(model.passengers()))
             for passenger in model.passengers():
-                if passenger.state in (WAITING, ASSIGNED):
+                if passenger.state in (WAITING, CONFIRMING):
                     self.assertLess(model.steps - passenger.request_step, model.max_wait)
             for taxi in model.taxis():
                 self.assertTrue(all(stop.passenger in model.passengers() for stop in taxi.plan))

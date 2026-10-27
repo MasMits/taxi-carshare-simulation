@@ -6,8 +6,9 @@ The development plan is in [PLAN.md](PLAN.md).
 
 The city is a grid of square districts separated by one-cell roads. Taxis drive only on the roads,
 along the shortest route; driving along one road cell takes `taxi_steps_per_cell` steps.
-Passengers appear on the roads and call taxis (call for proposals); each free taxi makes an
-offer, the passenger accepts the one that brings them to their destination earliest.
+Passengers appear on the roads and call taxis (call for proposals). Taxis with available seats
+can offer a direct or shared ride. The passenger tries the offer with the earliest predicted
+arrival and waits for an explicit taxi confirmation before the booking becomes binding.
 
 ## Pollution
 
@@ -28,12 +29,77 @@ To finish faster, lower **Play Interval** or raise **Render Interval** (e.g. 10)
 3. Screenshot the statistics panel (CO₂ per passenger, km, passengers served...).
 4. Repeat with 2, 3 and 4 seats, changing nothing else.
 
-With the default settings (seed 42, detours on, 1000 steps, ~314 passengers) CO₂ per passenger goes
-from about 1,410 g with 1 seat to 1,070 g with 2 seats and about 1,030-1,045 g with 3-4 seats.
+Re-run comparisons after changing the allocation policy: pickup promises and
+waiting priority affect both service rates and emissions. Compare the fraction served alongside
+CO₂ per passenger, including passengers still waiting or riding when the run stops.
 
 ## Waiting and traffic
 
-New requests arrive at **0.3 passengers/step**. They expire after **60 steps** if boarding hasn't started. Assigned taxis are notified of cancellations.
+New requests arrive at **0.3 passengers/step**. An unconfirmed search expires after **60 steps**.
+After explicit taxi confirmation, the passenger keeps the booking even if traffic delays pickup.
+A confirmed taxi does not abandon that passenger to pursue a more attractive request.
+A green passenger is the taxi's **next stop**, not a booking queued behind other pickups or
+drop-offs. Each taxi can have at most one confirmed passenger awaiting pickup; it may
+already be carrying other riders. Once that pickup starts boarding, it may accept a new
+compatible pickup as its next stop. New requests cannot displace a confirmed pickup.
+
+### Negotiation and allocation
+
+Passenger states are `waiting` (searching), `confirming` (acceptance sent), `assigned`
+(taxi confirmed), `boarding`, `riding`, and `arrived`.
+
+1. A passenger broadcasts a CFP with a new round ID, origin, destination, ride tolerance,
+   original request time and search deadline.
+2. A taxi replies with a unique offer ID, expiry, predicted pickup/ride times and an absolute
+   latest pickup time. Offers are provisional, not seat reservations.
+3. The passenger accepts one offer and retains the others until confirmation or expiry.
+4. A taxi ranks competing acceptances, rechecks the offered conditions against its current route,
+   and replies with CONFIRM or FAILURE and a reason. Confirmation is allowed only when the
+   new pickup can be the next stop and no confirmed pickup is still pending. A duplicate
+   acceptance cannot book twice.
+5. A refused passenger tries a saved alternative in the same round. A fresh broadcast is needed
+   only after acceptable alternatives are exhausted. Confirmation releases unused offers.
+
+An empty taxi ranks requests by predicted time to reach pickup; a busy taxi uses added driving
+time along its current route. Both subtract `wait_priority * waiting_age` from that cost.
+Lower cost wins; original request time, then passenger ID break ties, so mailbox order does not
+choose the winner. Priorities are recalculated after each accepted booking. There is no central
+dispatcher, and individual taxis still make their own decisions.
+
+Pickup routes account for the direction needed after boarding. If the shortest approach would
+leave a taxi facing the wrong way, it can pass the pickup, turn legally at a junction and
+return before boarding. That empty approach time is included in the offer; passengers are
+not refused merely because a shortest approach would add an avoidable turnaround to their ride.
+The same route is used for planning, movement and junction-exit reservations.
+Yellow taxis have no bookings; orange taxis are assigned or carrying passengers.
+
+Every new insertion must preserve the pickup deadlines and ride tolerances of all confirmed
+passengers. Pickup promises refer to **boarding starting**, not boarding finishing. Newcomers
+cannot push an existing promise back. Predictions use free-flow travel: congestion can still
+cause a missed promise; each affected booking is counted once and remains active.
+
+The controls are shared by grid, ring and irregular demos:
+
+| Parameter / control | Default | Meaning |
+|---|---:|---|
+| `max_wait` / Search timeout | 60 | Maximum search duration before confirmation; does not limit future pickup time |
+| `offer_ttl` / Offer validity | 6 | Number of steps a saved offer remains eligible for acceptance |
+| `pickup_slack` / Pickup promise margin | 3 | Allowed margin over the pickup forecast when confirming; never extends the offered deadline |
+| `wait_priority` / Waiting passenger priority | 0.5 | Pickup/route time cost removed per step already waited; 0 disables aging |
+
+The provisional offer allows up to `offer_ttl` steps of negotiation beyond its initial approach
+forecast. Confirmation tightens that bound to the current forecast plus `pickup_slack`.
+The search deadline only limits when a taxi can confirm, not when boarding must start.
+There is no maximum approach distance or time: even a distant taxi can accept before the
+search expires. Nearer and on-route requests still receive preference in the ranking.
+
+Round ID, offer ID and sender must match before an acceptance, confirmation or trip event can
+change state. Expired offers and superseded rounds cannot create a new booking. Once confirmed,
+contract identity remains valid through arrival, independently of the proposal's expiry.
+
+The statistics panel shows pending confirmations, confirmed bookings, repeated broadcasts,
+attempts using saved alternatives, missed pickup promises and refusal reasons. These are event
+counts, not counts of distinct passengers: one passenger can receive several taxi refusals.
 
 **Traffic: lanes and queues** (default):
 - Road cells have one slot per direction; turns only at intersections.
@@ -74,7 +140,7 @@ The same taxi/passenger agents handle calls, sharing, queues and request cancell
 
 Change **Radial streets** and press **Reset** to rebuild the city. Capacity can range from 1 to 4.
 Triangles show moving taxis, squares show taxis at the curb, and a magenta border marks blocked
-cars. Blue/green dots are waiting/assigned passengers; dashed lines show occupied taxi routes.
+cars. Blue/purple/green dots are searching/confirming/assigned passengers; dashed lines show occupied taxi routes.
 The map updates from the actual model, alongside the passenger and traffic charts.
 
 This is a graph-city prototype: each road slot has equal free-flow travel cost (roughly 1.5

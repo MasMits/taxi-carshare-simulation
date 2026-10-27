@@ -8,7 +8,7 @@ import solara
 from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
 
-from .agents import DROPOFF, WAITING
+from .agents import CONFIRMING, DROPOFF, WAITING
 from .stats_view import PollutionStats
 
 
@@ -42,7 +42,7 @@ def render_map(model):
         last = max(i for i, s in enumerate(taxi.plan) if s.kind == DROPOFF and s.passenger in taxi.onboard)
         route, cell, heading = [taxi.pos], taxi.pos, taxi.heading
         for i, stop in enumerate(taxi.plan[:last + 1]):
-            leg = taxi.route_to(stop.cell, cell, heading, first=i == 0)
+            leg = taxi.route_to_stop(taxi.plan, i, cell, heading, first=i == 0)
             if leg:
                 heading = model.direction(leg[-2] if len(leg) > 1 else cell, leg[-1])
             route.extend(leg)
@@ -59,16 +59,17 @@ def render_map(model):
         heading = model.direction(passenger.pos, next(model.road_neighbours(passenger.pos)))
         x, y, _ = position(passenger.pos, heading, .65 + .15 * (passenger.unique_id % 3))
         parts.append(svg("circle", svg("title", f"Passenger {passenger.unique_id}: {passenger.state}"),
-                         cx=x, cy=y, r=.17, fill="#1465ce" if passenger.state == WAITING else "#098756",
+                         cx=x, cy=y, r=.17, fill=("#1465ce" if passenger.state == WAITING else
+                                                    "#8e44ad" if passenger.state == CONFIRMING else "#098756"),
                          stroke="white", stroke_width=.05))
     for taxi in model.taxis():
         x, y, angle = position(taxi.pos, taxi.heading, .22 if taxi.in_traffic else .65)
         shape = svg("path", d="M.38,0 L-.28,-.25 L-.28,.25 Z") if taxi.in_traffic else (
             svg("rect", x=-.23, y=-.23, width=.46, height=.46))
         title = svg("title", f"Taxi {taxi.unique_id}: {len(taxi.onboard)} on board, "
-                    f"{taxi.traffic_delay} blocked steps" + ("" if taxi.in_traffic else " (at curb)"))
+                    f"{taxi.booked()} booked, {taxi.traffic_delay} blocked steps" + ("" if taxi.in_traffic else " (at curb)"))
         parts.append(svg("g", title + shape, transform=f"translate({x},{y}) rotate({angle if taxi.in_traffic else 0})",
-                         fill="#f08c28" if taxi.onboard else "#f4ca33",
+                         fill="#f08c28" if taxi.plan or taxi.onboard else "#f4ca33",
                          stroke="#d81bce" if taxi.blocked else "#353535",
                          stroke_width=.14 if taxi.blocked else .06))
         if taxi.onboard:  # badge with the number of passengers inside
@@ -88,12 +89,12 @@ def render_map(model):
 @solara.component
 def GraphMap(model):
     update_counter.get()
-    solara.Markdown(f"**Step {model.steps}** · Waiting: **{model.count('waiting', 'assigned')}** · "
+    solara.Markdown(f"**Step {model.steps}** · Waiting: **{model.count('waiting', 'confirming', 'assigned')}** · "
                     f"Served: **{len(model.trips)}** · Cancelled: **{model.gave_up}** · "
                     f"Blocked taxis: **{sum(t.blocked for t in model.taxis())}**")
     solara.HTML(tag="div", unsafe_innerHTML=render_map(model))
-    solara.Markdown("Yellow: empty · Orange: busy · (n): passengers inside · Magenta border: blocked  \n"
-                    "Blue / green dots: passengers · Dashed line: ride route · ×: drop-off  \n"
+    solara.Markdown("Yellow: available · Orange: assigned/busy · (n): passengers inside · Magenta border: blocked  \n"
+                    "Blue: searching · Purple: confirming · Green: taxi coming · Dashed line: ride route · ×: drop-off  \n"
                     "Two directional lanes per road; squares wait at the curb.")
 
 
@@ -108,7 +109,7 @@ def graph_page(model_class, name, map_params):
         """Page 0: map and statistics side by side. Page 1: the charts, two per row."""
         if count == 2:
             return [{"i": 0, "w": 7, "h": 17, "moved": False, "x": 0, "y": 0},
-                    {"i": 1, "w": 5, "h": 11, "moved": False, "x": 7, "y": 0}]
+                    {"i": 1, "w": 5, "h": 18, "moved": False, "x": 7, "y": 0}]
         return [{"i": i, "w": 6, "h": 10, "moved": False, "x": 6 * (i % 2), "y": 10 * (i // 2)}
                 for i in range(count)]
 
@@ -118,7 +119,10 @@ def graph_page(model_class, name, map_params):
               "allow_detour": {"type": "Checkbox", "value": True, "label": "Allow detours for sharing"},
               "demand": slider("New passengers per step", .3, .1, 2., .1),
               "taxi_steps_per_cell": slider("Steps per road slot", 1, 1, 5),
-              "max_wait": slider("Max wait (steps)", 60, 10, 180, 10),
+              "max_wait": slider("Search timeout (steps)", 60, 10, 180, 10),
+              "pickup_slack": slider("Pickup promise margin (steps)", 3, 0, 10),
+              "wait_priority": slider("Waiting passenger priority", .5, 0., 2., .1),
+              "offer_ttl": slider("Offer validity (steps)", 6, 1, 15),
               "traffic": {"type": "Checkbox", "value": True, "label": "Traffic: lanes and queues"},
               "stop_at": slider("Stop at step (0 = never)", 1000, 0, 3000, 100), "seed": 42}
     return SolaraViz(model_class(seed=42), model_params=params, name=name, play_interval=200,

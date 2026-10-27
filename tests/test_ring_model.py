@@ -15,7 +15,8 @@ class RingCityTests(unittest.TestCase):
         from taxi_simulation.irregular_model import IrregularCityModel
 
         for model_class in (RingCityModel, IrregularCityModel):
-            params = {"seed": 42, "n_taxis": 3, "capacity": 4, "traffic": True}
+            params = {"seed": 42, "n_taxis": 3, "capacity": 4, "traffic": True,
+                      "offer_ttl": 4, "pickup_slack": 2, "wait_priority": 0.8}
             original = model_class(**params)
             reset_params = _build_model_init_kwargs(original, params, add_scenario_when_empty=True,
                                                     require_model_accepts_scenario=True)
@@ -24,6 +25,8 @@ class RingCityTests(unittest.TestCase):
                 original.step()
                 reset.step()
             self.assertEqual(reset.capacity, 4)
+            for key in ("offer_ttl", "pickup_slack", "wait_priority"):
+                self.assertEqual(getattr(reset, key), params[key])
             self.assertEqual([t.pos for t in original.taxis()], [t.pos for t in reset.taxis()])
             self.assertTrue(original.datacollector.get_model_vars_dataframe().equals(
                 reset.datacollector.get_model_vars_dataframe()))
@@ -69,6 +72,16 @@ class RingCityTests(unittest.TestCase):
         model._routes.clear()
         self.assertEqual(model.route(start, target), expected)
 
+    def test_unconfirmed_graph_passenger_still_leaves_at_search_deadline(self):
+        model = RingCityModel(n_taxis=0, demand=0, max_wait=3, seed=1)
+        passenger = model.add_passenger(model.roads[0], model.roads[-1])
+        model.step()
+        model.step()
+        self.assertIn(passenger, model.passengers())
+        model.step()
+        self.assertNotIn(passenger, model.passengers())
+        self.assertEqual(model.gave_up, 1)
+
     def test_graph_runs_traffic_sharing_and_cancellation_reproducibly(self):
         runs = []
         for _ in range(2):
@@ -89,7 +102,11 @@ class RingCityTests(unittest.TestCase):
                     self.assertLessEqual(taxi.booked(), model.capacity)
             self.assertGreater(len(model.trips), 0)
             self.assertTrue(any(t['shared'] for t in model.trips))
-            self.assertGreater(model.gave_up, 0)
+            # Cancellations are not required when every search is confirmed in time.
+            self.assertGreater(model.confirmed_orders, 0)
+            for passenger in model.passengers():
+                if passenger.state in ('waiting', 'confirming'):
+                    self.assertLess(model.steps - passenger.request_step, model.max_wait)
             self.assertGreater(sum(t.traffic_delay for t in model.taxis()), 0)
             runs.append((model.trips, model.gave_up, [t.pos for t in model.taxis()]))
         self.assertEqual(runs[0], runs[1])

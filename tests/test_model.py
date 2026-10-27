@@ -130,6 +130,7 @@ class SharingTests(unittest.TestCase):
         model.grid.move_agent(taxi, (0, 0))
         first = model.add_passenger((0, 0), (24, 0))
         taxi.plan = taxi.best_insertion(first.trip(), first)[1]
+        taxi.serve_stops_here()  # the first rider is boarding, not waiting in a pickup queue
         return model, taxi
 
     def test_passenger_on_the_route_can_join(self):
