@@ -1,7 +1,7 @@
 # Taxi carshare simulation (Mesa)
 
 Multi-agent simulation of shared taxi rides in a city, built with [Mesa](https://mesa.readthedocs.io/).
-Project of the course *Foundations of Agent-based Systems* (M1 DKAI, Université Paris-Saclay).
+Project of the course _Foundations of Agent-based Systems_ (M1 DKAI, Université Paris-Saclay).
 The development plan is in [PLAN.md](PLAN.md).
 
 The city is a grid of square districts separated by one-cell roads. Taxis drive only on the roads,
@@ -13,6 +13,7 @@ arrival and waits for an explicit taxi confirmation before the booking becomes b
 ## Pollution
 
 Each taxi counts the CO2 it emits:
+
 - driving: every road cell costs `cell_km × co2_per_km` (defaults: 0.25 km, 150 g CO2/km);
 - stuck in traffic: every blocked step costs `idle_co2_per_step` (default 25 g, engine running);
 - parked at the curb: engine off, no emission.
@@ -21,11 +22,13 @@ The model reports `CO2 (kg)` for the whole fleet and `CO2 per passenger (g)` (fl
 passengers). Compare this second value for 1 seat (classic taxis) and 2+ seats (shared taxis).
 
 ### Comparing 1 seat with 2-4 seats
+
 Passenger requests use their own random generator, so with the same seed every run gets exactly the
 same passengers, whatever the taxis do. Each run stops at **Stop at step** (default 1000).
 To finish faster, lower **Play Interval** or raise **Render Interval** (e.g. 10).
+
 1. Tick **Taxis may change their route to pick someone up** (otherwise 3-4 seats behave like 2).
-2. Set **Seats per taxi** to 1, press **Reset**, then **▶** and wait until the panel says *finished*.
+2. Set **Seats per taxi** to 1, press **Reset**, then **▶** and wait until the panel says _finished_.
 3. Screenshot the statistics panel (CO₂ per passenger, km, passengers served...).
 4. Repeat with 2, 3 and 4 seats, changing nothing else.
 
@@ -80,12 +83,12 @@ cause a missed promise; each affected booking is counted once and remains active
 
 The controls are shared by grid, ring and irregular demos:
 
-| Parameter / control | Default | Meaning |
-|---|---:|---|
-| `max_wait` / Search timeout | 60 | Maximum search duration before confirmation; does not limit future pickup time |
-| `offer_ttl` / Offer validity | 6 | Number of steps a saved offer remains eligible for acceptance |
-| `pickup_slack` / Pickup promise margin | 3 | Allowed margin over the pickup forecast when confirming; never extends the offered deadline |
-| `wait_priority` / Waiting passenger priority | 0.5 | Pickup/route time cost removed per step already waited; 0 disables aging |
+| Parameter / control                          | Default | Meaning                                                                                     |
+| -------------------------------------------- | ------: | ------------------------------------------------------------------------------------------- |
+| `max_wait` / Search timeout                  |      60 | Maximum search duration before confirmation; does not limit future pickup time              |
+| `offer_ttl` / Offer validity                 |       6 | Number of steps a saved offer remains eligible for acceptance                               |
+| `pickup_slack` / Pickup promise margin       |       3 | Allowed margin over the pickup forecast when confirming; never extends the offered deadline |
+| `wait_priority` / Waiting passenger priority |     0.5 | Pickup/route time cost removed per step already waited; 0 disables aging                    |
 
 The provisional offer allows up to `offer_ttl` steps of negotiation beyond its initial approach
 forecast. Confirmation tightens that bound to the current forecast plus `pickup_slack`.
@@ -102,6 +105,7 @@ attempts using saved alternatives, missed pickup promises and refusal reasons. T
 counts, not counts of distinct passengers: one passenger can receive several taxi refusals.
 
 **Traffic: lanes and queues** (default):
+
 - Road cells have one slot per direction; turns only at intersections.
 - Movement uses occupancy snapshots; cars wait if the lane ahead was occupied.
 - Junctions admit one car at a time if the exit is clear. Longest-waiting has priority.
@@ -113,18 +117,20 @@ Arrival ETAs use free-flow times and heading constraints. Congestion may exceed 
 Adjust **Maximum wait**, demand, taxis, and speed, then **Reset**. For more congestion, use a smaller city or more taxis.
 
 ## Install
+
 Python 3.12 or newer.
+
 ```
 python -m pip install -r requirements.txt
 ```
 
 ## Run
-| What | Command |
-|---|---|
-| Web interface (opens in the browser) | `python main.py` |
-| Same, directly with Solara | `solara run taxi_simulation.app` |
-| Quick text check, no interface | `python -m taxi_simulation.model` |
-| Tests | `python -m unittest discover tests` |
+
+| What                                 | Command                          |
+| ------------------------------------ | -------------------------------- |
+| Web interface (opens in the browser) | `python main.py`                 |
+| Same, directly with Solara           | `solara run taxi_simulation.app` |
+| Quick text check, no interface       | `python -m                       |
 
 In the interface: choose the map with the tabs at the top (**Grid city**, **Ring city**,
 **Irregular city**), press **▶** to run, **Step** for one step. After moving a slider, press **Reset**.
@@ -161,24 +167,31 @@ Change **City layout seed** to generate another city, **Junctions** to change it
 seed is separate from the simulation seed, so changing agent randomness does not rebuild
 the street layout. Both graph demos share their road-space and rendering code.
 
-Both launch modules only select a model and its map controls. `graph_page` in
-`graph_view.py` supplies the shared controls, map and charts; `RoadGraphModel`
-supplies common model defaults. The two city classes contain only map settings
-and generation, forwarding simulation parameters to the shared model.
-
 ## Files
+
+Folders follow the features: the simulation core, one folder per map, and the shared interface.
+Every map is a subclass of `CityModel` that only builds its roads (`build_map`) and says how
+they connect (`road_neighbours`, `is_intersection`, `direction`); agents, messages, traffic and
+statistics are the same for every map.
+
 ```
-main.py                     entry point (starts the web interface)
-taxi_simulation/model.py    CityModel: the city (environment), scheduler, statistics
-taxi_simulation/agents.py   the agents: Passenger and Taxi
-taxi_simulation/messages.py messages between agents (contract net protocol)
-taxi_simulation/app.py      web interface: one tab per city map
-taxi_simulation/grid_app.py Grid city page
-taxi_simulation/ring_model.py Graph city: circular roads and radial streets
-taxi_simulation/ring_app.py   Ring city page
-taxi_simulation/irregular_model.py Seeded irregular street generator
-taxi_simulation/irregular_app.py Irregular city page
-taxi_simulation/graph_model.py Shared graph road space and directional slots
-taxi_simulation/graph_view.py  Shared graph-city visualization
-tests/                      unit tests
+main.py                       entry point (starts the web interface)
+taxi_simulation/
+  app.py                      web interface: one tab per city map
+  core/
+    model.py                  CityModel: environment, scheduler, statistics
+    roads.py                  what each map defines, and the routes taxis drive
+    traffic.py                lanes, junctions, moving all taxis at once
+    passenger.py              Passenger agent (calls taxis, picks an offer)
+    taxi.py                   Taxi agent (answers calls, drives, boards)
+    planning.py               taxi plan: routes to stops, where a new trip fits
+    messages.py               messages between agents (contract net protocol)
+  grid/   model.py, page.py   grid city: square districts on a Mesa MultiGrid
+  graph/  model.py, map.py    road-graph city on a Mesa NetworkGrid, and its map
+  ring/   model.py, page.py   ring city: two circular roads and radial streets
+  irregular/ model.py, page.py  irregular city: seeded random streets
+  ui/
+    page.py                   controls, charts and layout shared by every page
+    stats.py                  statistics panel (CO2 per passenger...)
+    drawing.py                colours and drawing helpers shared by every map
 ```

@@ -1,27 +1,32 @@
-"""Shared road-graph space for cities with discrete, directional lane slots."""
+"""Road-graph city: junctions joined by road sections, on a Mesa NetworkGrid.
+
+Each section is cut into slots (graph nodes) with one lane per direction.
+The graph decides how taxis move; coordinates are only used to draw the map.
+"""
 
 import math
 
 import networkx as nx
 from mesa.space import NetworkGrid
 
-from .model import CityModel
+from taxi_simulation.core.model import CityModel
 
 
-class RoadGraphModel(CityModel):
-    """Geometry draws roads; topology and (section, direction) control traffic."""
+class GraphCityModel(CityModel):
+    """Base of the ring and irregular cities: they only add their build_map."""
 
-    def __init__(self, n_taxis=16, allow_detour=True, scenario=None, **kwargs):
-        # Mesa's Reset supplies a default Scenario; these demos use explicit parameters.
+    map_labels = []  # (x, y, text) written on the map
+
+    def __init__(self, n_taxis=16, allow_detour=True, **kwargs):
         super().__init__(n_taxis=n_taxis, allow_detour=allow_detour, **kwargs)
 
-    def initialize_network(self):
+    def start_network(self):
         self.network = nx.Graph()
         self.coordinates = {}
         self.junctions = set()
         self.sections = []
         self._directions = {}
-        self.block = 4
+        self.min_trip = 4
 
     def add_junction(self, index, x, y):
         node = (-1, index)
@@ -31,6 +36,7 @@ class RoadGraphModel(CityModel):
         return node
 
     def add_section(self, start, end, point, length):
+        """A road from start to end; point(t) gives its shape for t in [0, 1]."""
         section_id = len(self.sections)
         steps = max(2, math.ceil(length / 1.5))
         nodes = [start]
@@ -64,25 +70,3 @@ class RoadGraphModel(CityModel):
 
     def direction(self, start, end):
         return self._directions[start, end]
-
-    def next_cell(self, pos, target, heading=None):
-        if self.traffic and heading is not None and not self.is_intersection(pos):
-            return next(n for n in self.network[pos] if self.direction(pos, n) == heading)
-        distances = self.distances_to(target)
-        return min(self.network[pos], key=lambda node: distances[node])
-
-    def lane_vector(self, pos, heading):
-        """Local road tangent, for drawing vehicles on the correct side."""
-        if heading is None:
-            return (1.0, 0.0)
-        for neighbour in self.network[pos]:
-            if self.direction(pos, neighbour) == heading:
-                a, b = self.coordinates[pos], self.coordinates[neighbour]
-                break
-            if self.direction(neighbour, pos) == heading:
-                a, b = self.coordinates[neighbour], self.coordinates[pos]
-                break
-        else:
-            return (1.0, 0.0)
-        length = math.hypot(b[0] - a[0], b[1] - a[1])
-        return ((b[0] - a[0]) / length, (b[1] - a[1]) / length)

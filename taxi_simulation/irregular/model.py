@@ -5,7 +5,7 @@ import random
 
 import networkx as nx
 
-from .graph_model import RoadGraphModel
+from taxi_simulation.graph.model import GraphCityModel
 
 
 def streets_cross(a, b, c, d):
@@ -17,7 +17,7 @@ def streets_cross(a, b, c, d):
     )
 
 
-class IrregularCityModel(RoadGraphModel):
+class IrregularCityModel(GraphCityModel):
     """Connect scattered junctions with a Euclidean minimum spanning tree.
 
     Add short non-crossing roads to form loops, preserving cul-de-sacs.
@@ -25,7 +25,6 @@ class IrregularCityModel(RoadGraphModel):
     is an actual junction; roads have discrete slots in both directions.
     """
 
-    map_title = "Irregular city: unequal street lengths, junctions, loops and dead ends"
     map_labels = []
 
     def __init__(self, map_seed=7, junction_count=28, extra_roads=0.65, **kwargs):
@@ -39,7 +38,7 @@ class IrregularCityModel(RoadGraphModel):
         super().__init__(**kwargs)
 
     def build_map(self):
-        self.initialize_network()
+        self.start_network()
         map_rng = random.Random(self.map_seed)
         points = []
         for _ in range(10000):

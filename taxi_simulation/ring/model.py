@@ -2,13 +2,12 @@
 
 import math
 
-from .graph_model import RoadGraphModel
+from taxi_simulation.graph.model import GraphCityModel
 
 
-class RingCityModel(RoadGraphModel):
+class RingCityModel(GraphCityModel):
     """Build rings using the shared agents, directional road slots and traffic."""
 
-    map_title = "Ring-road simulation: two rings, radial streets and a city centre"
     map_labels = [(0, 17.1, "Outer ring"), (0, 9.3, "Inner ring")]
 
     def __init__(self, arms=8, **kwargs):
@@ -18,7 +17,7 @@ class RingCityModel(RoadGraphModel):
         super().__init__(**kwargs)
 
     def build_map(self):
-        self.initialize_network()
+        self.start_network()
         rings = []
         for ring_index, radius in enumerate((8.0, 15.0)):
             ring = []

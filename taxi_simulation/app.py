@@ -2,7 +2,9 @@
 
 import solara
 
-from taxi_simulation import grid_app, irregular_app, ring_app
+from taxi_simulation.grid.page import page as grid_page
+from taxi_simulation.irregular.page import page as irregular_page
+from taxi_simulation.ring.page import page as ring_page
 
 
 @solara.component
@@ -20,7 +22,7 @@ def Layout(children=[]):
 
 
 routes = [
-    solara.Route("/", component=grid_app.page, label="Grid city", layout=Layout),
-    solara.Route("ring", component=ring_app.page, label="Ring city"),
-    solara.Route("irregular", component=irregular_app.page, label="Irregular city"),
+    solara.Route("/", component=grid_page, label="Grid city", layout=Layout),
+    solara.Route("ring", component=ring_page, label="Ring city"),
+    solara.Route("irregular", component=irregular_page, label="Irregular city"),
 ]
