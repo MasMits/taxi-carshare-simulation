@@ -3,7 +3,6 @@
 from html import escape
 from math import atan2, degrees
 
-import mesa.visualization.solara_viz as solara_viz
 import solara
 from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
@@ -105,15 +104,6 @@ def slider(label, value, minimum, maximum, step=1):
 
 def graph_page(model_class, name, map_params):
     """Only the map controls differ between the two launch modules."""
-    def layout(count):
-        """Page 0: map and statistics side by side. Page 1: the charts, two per row."""
-        if count == 2:
-            return [{"i": 0, "w": 7, "h": 17, "moved": False, "x": 0, "y": 0},
-                    {"i": 1, "w": 5, "h": 18, "moved": False, "x": 7, "y": 0}]
-        return [{"i": i, "w": 6, "h": 10, "moved": False, "x": 6 * (i % 2), "y": 10 * (i // 2)}
-                for i in range(count)]
-
-    solara_viz.make_initial_grid_layout = layout
     params = {**map_params, "n_taxis": slider("Taxis", 16, 2, 40),
               "capacity": slider("Seats per taxi", 2, 1, 4),
               "allow_detour": {"type": "Checkbox", "value": True, "label": "Allow detours for sharing"},

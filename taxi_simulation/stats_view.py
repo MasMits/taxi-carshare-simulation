@@ -4,10 +4,10 @@ Run the simulation with the same seed until it stops, once per number of seats,
 and compare the panels: every run gets the same passengers.
 """
 
+import mesa.visualization.solara_viz as solara_viz
 import solara
 from mesa.visualization.utils import update_counter
 
-# Readable names for Mesa's "Page 0", "Page 1" tabs.
 REFUSAL_LABELS = {
     "capacity": "no seats available",
     "pickup_in_progress": "already heading to a confirmed pickup",
@@ -19,6 +19,19 @@ REFUSAL_LABELS = {
     "search_timeout": "search deadline reached",
 }
 
+
+def layout(count):
+    """Page 0: map and statistics side by side. Page 1: the charts, two per row."""
+    if count == 2:
+        return [{"i": 0, "w": 7, "h": 17, "moved": False, "x": 0, "y": 0},
+                {"i": 1, "w": 5, "h": 18, "moved": False, "x": 7, "y": 0}]
+    return [{"i": i, "w": 6, "h": 10, "moved": False, "x": 6 * (i % 2), "y": 10 * (i // 2)}
+            for i in range(count)]
+
+
+solara_viz.make_initial_grid_layout = layout  # shared by every city page
+
+# Readable names for Mesa's "Page 0", "Page 1" tabs.
 PAGE_NAMES = {"Page 0": "Simulation", "Page 1": "Graphs"}
 _tab = solara.v.Tab
 

@@ -1,4 +1,4 @@
-"""Run: solara run taxi_simulation.ring_app --port 8766."""
+"""Ring city page (a tab of the web interface)."""
 
 from .graph_view import graph_page
 from .ring_model import RingCityModel

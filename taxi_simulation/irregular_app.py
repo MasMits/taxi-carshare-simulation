@@ -1,4 +1,4 @@
-"""Run: solara run taxi_simulation.irregular_app --port 8767."""
+"""Irregular city page (a tab of the web interface)."""
 
 from .graph_view import graph_page, slider
 from .irregular_model import IrregularCityModel
