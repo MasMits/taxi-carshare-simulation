@@ -124,16 +124,122 @@ Python 3.12 or newer.
 python -m pip install -r requirements.txt
 ```
 
+## Verification for evaluation
+
+Run these commands from the project root, using Python 3.12 or newer. If your system
+calls Python `python3`, replace `python` with `python3` in the commands below.
+
+### 1. Run the automated checks
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The suite should finish with `OK`. It checks negotiation conflicts, duplicate and stale
+messages, confirmed pickups, routing on all three maps, shared rides, capacity limits,
+and the CSV export's passenger accounting and undefined averages. No browser is needed.
+
+### 2. Run a short simulation without the interface
+
+```bash
+python -m taxi_simulation.grid.model
+```
+
+This runs the grid city for 200 steps with seed 1 and prints the number of requests and
+completed trips, average waiting and ride times, distance and CO2. It should finish
+without an exception; this short run is a smoke check, not the report experiment.
+
+### 3. Check the experiment export quickly
+
+```bash
+python experiments.py --seeds 2 --steps 100 --workers 1 --output results/quick
+```
+
+Expected output: `Saved 70 rows to results/quick/runs.csv`. The 35 settings use two
+seeds each; overlapping settings need only 58 unique simulations. The command also
+writes `results/quick/metadata.json`. This checks the export pipeline; the shorter
+horizon and smaller sample do not reproduce the report's numerical results.
+
+### 4. Reproduce the full report experiments
+
+```bash
+python experiments.py --seeds 10 --steps 1000 --workers 4 --output results/reproduced
+```
+
+This runs E1 (seats and detours), E2 (demand), and E3 (fleet size), with seeds 0–9.
+Expected output: `Saved 350 rows to results/reproduced/runs.csv`, from 290 unique
+simulations. It takes several minutes, depending on the computer. Use `--workers 1`
+to run sequentially with the same settings and results.
+
+The separate output folder preserves the submitted `results/runs.csv` and
+`results/metadata.json`. With the same source, Python and dependency versions, compare
+the reproduced CSV with the submitted one:
+
+```bash
+python -c "from pathlib import Path; assert Path('results/runs.csv').read_bytes() == Path('results/reproduced/runs.csv').read_bytes(), 'CSV files differ; check source and package versions in metadata.json'; print('CSV results match')"
+```
+
+Compare CSV files, not metadata files: the metadata contains a new creation timestamp
+for each invocation. The submitted metadata records the Python, Mesa and NumPy versions
+and source hashes used for the report. The Excel workbook linked below contains
+per-setting means, paired CO2 savings and 95% confidence intervals calculated from the CSV.
+
+### 5. Inspect the interactive simulation
+
+```bash
+python main.py
+```
+
+Open the local address printed by Solara if the browser does not open automatically.
+Select **Grid city**, set **Seats per taxi** to 1, press **Reset**, then **Play**.
+Repeat with 2 seats and detours enabled, keeping the other controls unchanged. Inspect
+the map, statistics and **Graphs** tab. **Ring city** and **Irregular city** demonstrate
+the same agents on alternative maps; the report experiments use the grid city only.
+Stop the server with `Ctrl+C` in the terminal.
+
 ## Run
 
 | What                                 | Command                          |
 | ------------------------------------ | -------------------------------- |
 | Web interface (opens in the browser) | `python main.py`                 |
 | Same, directly with Solara           | `solara run taxi_simulation.app` |
-| Quick text check, no interface       | `python -m                       |
+| Quick text check, no interface       | `python -m taxi_simulation.grid.model` |
+| Export report experiments to CSV    | `python experiments.py --workers 4` |
 
 In the interface: choose the map with the tabs at the top (**Grid city**, **Ring city**,
 **Irregular city**), press **▶** to run, **Step** for one step. After moving a slider, press **Reset**.
+
+## Reproducible experiments
+
+`python experiments.py --workers 4` runs the grid-city comparisons for seats and detours,
+demand, and fleet size. Each setting uses seeds 0–9 and 1000 steps. Identical settings
+shared by the three experiments reuse the same run: 290 unique runs produce 350 CSV rows.
+Use `--workers 1` for sequential execution. For a quick export check, use
+`python experiments.py --seeds 2 --steps 100 --output results/quick`.
+
+`results/runs.csv` contains one row per experiment, setting and seed, including settings,
+passenger counts, travel times, distance and emissions. `results/metadata.json` records
+the fixed parameters, package versions and source hashes. The exporter uses the existing
+simulation without changing its rules. A rerun replaces those two output files.
+
+Exported `served_fraction`, `gave_up_fraction` and `unfinished_fraction` use **all spawned
+requests** as the denominator and sum to 1. Unfinished requests include waiting passengers,
+passengers boarding/riding, and arrivals whose message has not yet been recorded by the
+passenger at the stopping step. These fractions differ from the interface's `Service %`,
+which excludes unfinished requests. Wait/ride averages describe completed trips only;
+whole-fleet CO2 includes driving and idling for unfinished trips. Empty CSV values mean
+an undefined ratio/average, such as CO2 per served passenger when nobody has arrived.
+
+Compare settings using the same seeds. Report means and 95% Student-t intervals across
+seeds, and compute CO2 savings against the one-seat run of the same experiment, demand,
+fleet, detour setting and seed. Read CO2 per completed passenger together with total CO2,
+completed share and unfinished share; a low emission ratio alone does not establish better service.
+
+The [Excel analysis](outputs/01a18a08-f0f4-7631-b37c-e89cae3537ce/taxi-analysis.xlsx)
+contains the current experiment results, eight editable charts, per-seed source data and
+formula-based means and confidence intervals. Its Seats, Demand and Fleet sheets correspond
+to E1, E2 and E3. It is a saved analysis of these runs; replacing the CSV does not automatically
+refresh the workbook or rerun the simulation.
 
 ## Ring-road graph demo
 

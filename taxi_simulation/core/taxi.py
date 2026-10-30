@@ -72,6 +72,11 @@ class Taxi(TaxiPlanner, MessageAgent):
             self.send(passenger, INFORM, {"event": event, "offer_id": contract["offer_id"],
                                          **content}, contract["round_id"])
 
+    def matches_offer(self, offer, msg):
+        """A reply must belong to both the passenger and the negotiation round."""
+        return (bool(offer) and offer["passenger"] is msg.sender
+                and offer["round_id"] == msg.conversation_id)
+
     def request_score(self, trip, passenger):
         best = self.best_insertion(trip, passenger)
         if best is None:
@@ -84,6 +89,19 @@ class Taxi(TaxiPlanner, MessageAgent):
         return cost - self.model.wait_priority * age
 
     def decide(self, messages):
+        messages = self.prepare_messages(messages)
+        self.process_acceptances(messages)
+        self.answer_calls(messages)
+        self.count_late_pickups()
+
+        if self.boarding_left > 0:
+            return BOARD
+        if self.plan and self.plan[0].cell == self.pos and not self.route_to_stop(self.plan, 0):
+            return SERVE
+        return DRIVE if self.plan else WAIT
+
+    def prepare_messages(self, messages):
+        """Expire offers and apply cancellations/new rounds before any acceptance."""
         now = self.model.steps
         self.offers = {key: value for key, value in self.offers.items()
                        if value["expires_at"] >= now and value["passenger"] in self.model.agents}
@@ -95,28 +113,31 @@ class Taxi(TaxiPlanner, MessageAgent):
         for msg in messages:
             if msg.performative in (REJECT, CANCEL):
                 offer = self.offers.get(msg.content.get("offer_id"))
-                if offer and offer["passenger"] is msg.sender and offer["round_id"] == msg.conversation_id:
+                if self.matches_offer(offer, msg):
                     del self.offers[msg.content["offer_id"]]
 
         for msg in messages:
             if msg.performative == CFP and msg.conversation_id > self.latest_round.get(msg.sender, 0):
                 self.offers = {key: offer for key, offer in self.offers.items()
                                if offer["passenger"] is not msg.sender or offer["round_id"] >= msg.conversation_id}
+        return messages
 
+    def acceptance_priority(self, msg):
+        offer = self.offers.get(msg.content.get("offer_id"))
+        if not self.matches_offer(offer, msg):
+            return float("inf"), self.model.steps, msg.sender.unique_id
+        return (self.request_score(offer["trip"], msg.sender),
+                offer["trip"].get("request_step", self.model.steps), msg.sender.unique_id)
+
+    def process_acceptances(self, messages):
         accepts = [msg for msg in messages if msg.performative == ACCEPT]
-
-        def score(msg):
-            offer = self.offers.get(msg.content.get("offer_id"))
-            valid = offer and offer["passenger"] is msg.sender and offer["round_id"] == msg.conversation_id
-            return (self.request_score(offer["trip"], msg.sender) if valid else float("inf"),
-                    offer["trip"].get("request_step", now) if valid else now, msg.sender.unique_id)
-
         # Recompute priorities after each commitment because the route has changed.
         while accepts:
-            msg = min(accepts, key=score)
+            msg = min(accepts, key=self.acceptance_priority)
             accepts.remove(msg)
             self.accept_offer(msg)
 
+    def answer_calls(self, messages):
         # Proposals do not reserve seats, so CFP order cannot improve allocation.
         # Only the newest round from each sender is eligible in this batch.
         calls = {}
@@ -128,16 +149,12 @@ class Taxi(TaxiPlanner, MessageAgent):
         for msg in sorted(calls.values(), key=lambda msg: msg.sender.unique_id):
             self.propose(msg)
 
+    def count_late_pickups(self):
         for passenger, contract in self.contracts.items():
             if (any(stop.kind == PICKUP and stop.passenger is passenger for stop in self.plan)
-                    and now > contract["pickup_by"] and passenger not in self.late_pickups):
+                    and self.model.steps > contract["pickup_by"] and passenger not in self.late_pickups):
                 self.late_pickups.add(passenger)
                 self.model.pickup_violations += 1
-        if self.boarding_left > 0:
-            return BOARD
-        if self.plan and self.plan[0].cell == self.pos and not self.route_to_stop(self.plan, 0):
-            return SERVE
-        return DRIVE if self.plan else WAIT
 
     def accept_offer(self, msg):
         now = self.model.steps
@@ -151,8 +168,7 @@ class Taxi(TaxiPlanner, MessageAgent):
         if not offer:
             self.refuse(msg, "expired_or_unknown_offer")
             return
-        if (offer["passenger"] is not msg.sender or offer["round_id"] != msg.conversation_id
-                or self.latest_round.get(msg.sender) != msg.conversation_id):
+        if not self.matches_offer(offer, msg) or self.latest_round.get(msg.sender) != msg.conversation_id:
             # A foreign sender must not consume another passenger's offer.
             self.offers[offer["offer_id"]] = offer
             self.refuse(msg, "stale_or_foreign_offer")
@@ -161,18 +177,23 @@ class Taxi(TaxiPlanner, MessageAgent):
         best = self.best_insertion(trip, msg.sender)
         if now >= trip["search_deadline"]:
             self.refuse(msg, "search_timeout")
-        elif best is None:
+            return
+        if best is None:
             self.refuse(msg, self.unavailable_reason("commitment_conflict"))
-        elif best[2][1] - best[2][0] > offer["ride"]:
+            return
+
+        _, plan, (pickup_t, dropoff_t) = best
+        if dropoff_t - pickup_t > offer["ride"]:
             self.refuse(msg, "changed_ride")
-        else:
-            pickup_by = min(offer["pickup_by"], now + max(0, best[2][0] - self.model.boarding_time)
-                            + self.model.pickup_slack)
-            self.plan = best[1]
-            self.contracts[msg.sender] = {"offer_id": offer["offer_id"],
-                                          "round_id": msg.conversation_id, "pickup_by": pickup_by}
-            self.reply(msg, CONFIRM, self.contracts[msg.sender].copy())
-            self.model.confirmed_orders += 1
+            return
+
+        pickup_duration = max(0, pickup_t - self.model.boarding_time)
+        pickup_by = min(offer["pickup_by"], now + pickup_duration + self.model.pickup_slack)
+        contract = {"offer_id": offer["offer_id"], "round_id": msg.conversation_id, "pickup_by": pickup_by}
+        self.plan = plan
+        self.contracts[msg.sender] = contract
+        self.reply(msg, CONFIRM, contract.copy())
+        self.model.confirmed_orders += 1
 
     def propose(self, msg):
         now = self.model.steps
@@ -240,23 +261,28 @@ class Taxi(TaxiPlanner, MessageAgent):
                 break  # pass the passenger until returning in the correct lane
             stop = self.plan.pop(0)
             if stop.kind == DROPOFF:
-                del self.onboard[stop.passenger]
-                self.notify(stop.passenger, "arrived", step=self.model.steps,
-                            shared=stop.passenger in self.shared)
-                self.contracts.pop(stop.passenger, None)
-                self.latest_round.pop(stop.passenger, None)
-                self.late_pickups.discard(stop.passenger)
-                self.shared.discard(stop.passenger)
+                self.drop_off(stop.passenger)
             else:
-                self.onboard[stop.passenger] = self.model.steps + self.model.boarding_time
-                if len(self.onboard) > 1:
-                    self.shared.update(self.onboard)
-                self.boarding = stop.passenger
-                self.boarding_left = self.model.boarding_time
-                self.notify(stop.passenger, "boarding", step=self.model.steps)
-                self.progress = 0
-                if self.boarding_left == 0:
-                    self.finish_boarding()
+                self.start_boarding(stop.passenger)
+
+    def drop_off(self, passenger):
+        del self.onboard[passenger]
+        self.notify(passenger, "arrived", step=self.model.steps, shared=passenger in self.shared)
+        self.contracts.pop(passenger, None)
+        self.latest_round.pop(passenger, None)
+        self.late_pickups.discard(passenger)
+        self.shared.discard(passenger)
+
+    def start_boarding(self, passenger):
+        self.onboard[passenger] = self.model.steps + self.model.boarding_time
+        if len(self.onboard) > 1:
+            self.shared.update(self.onboard)
+        self.boarding = passenger
+        self.boarding_left = self.model.boarding_time
+        self.notify(passenger, "boarding", step=self.model.steps)
+        self.progress = 0
+        if self.boarding_left == 0:
+            self.finish_boarding()
 
     def finish_boarding(self):
         self.notify(self.boarding, "picked_up", step=self.model.steps)
