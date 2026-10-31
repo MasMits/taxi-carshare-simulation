@@ -57,7 +57,7 @@ class RoadMap:
 
     def next_cell(self, pos, target, heading=None):
         """Continue in-lane, or choose a shortest route at a junction."""
-        if self.traffic and heading is not None and not self.is_intersection(pos):
+        if heading is not None and not self.is_intersection(pos):
             return next(cell for cell in self.road_neighbours(pos)
                         if self.direction(pos, cell) == heading)
         dist = self.distances_to(target)
@@ -65,7 +65,7 @@ class RoadMap:
 
     def route(self, start, target, heading=None):
         """Follow the current lane to a junction before turning or reversing."""
-        key = (start, target, heading if self.traffic else None)
+        key = (start, target, heading)
         if key not in self._routes:
             cells, cell = [], start
             while cell != target:

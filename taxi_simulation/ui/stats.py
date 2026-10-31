@@ -13,7 +13,7 @@ REFUSAL_LABELS = {
     "route_constraints": "incompatible route or pickup deadline",
     "commitment_conflict": "conflicts with existing commitments",
     "changed_ride": "offered ride time no longer available",
-    "expired_or_unknown_offer": "offer expired or unavailable",
+    "unknown_offer": "offer unavailable",
     "stale_or_foreign_offer": "offer identity mismatch",
     "search_timeout": "search deadline reached",
 }

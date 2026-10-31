@@ -102,8 +102,8 @@ class TaxiPlanner:
     def best_insertion(self, trip, passenger):
         """Cheapest feasible plan that also serves the new trip.
 
-        By default only one pending pickup is allowed, always as the next stop.
-        With multiple pickups enabled, a new pickup can precede pending pickups.
+        A new pickup is always the next stop and can precede pending pickups.
+        Disabling multiple pickups allows only one pending pickup at a time.
         Existing stops keep their order and commitments remain feasible.
         Without detours the current route cannot lengthen.
         Returns (finish_time, plan, (pickup_t, dropoff_t)) or None.
@@ -123,10 +123,6 @@ class TaxiPlanner:
                 continue
             result = self.evaluate(plan)
             if result is None:
-                continue
-            pickup_t, _ = result[1][passenger]
-            deadline = trip.get("pickup_by", float("inf"))
-            if self.model.steps + max(0, pickup_t - self.model.boarding_time) > deadline:
                 continue
             if best is None or result[0] < best[0]:
                 best = (result[0], plan, result[1][passenger])

@@ -100,10 +100,9 @@ class Taxi(TaxiPlanner, MessageAgent):
         return DRIVE if self.plan else WAIT
 
     def prepare_messages(self, messages):
-        """Expire offers and apply cancellations/new rounds before any acceptance."""
-        now = self.model.steps
+        """Discard departed passengers and apply cancellations/new rounds before acceptance."""
         self.offers = {key: value for key, value in self.offers.items()
-                       if value["expires_at"] >= now and value["passenger"] in self.model.agents}
+                       if value["passenger"] in self.model.agents}
         self.latest_round = {passenger: round_id for passenger, round_id in self.latest_round.items()
                              if passenger in self.model.agents}
         # Agent addresses and conversation/offer identities are checked before any mutation.
@@ -164,14 +163,14 @@ class Taxi(TaxiPlanner, MessageAgent):
             return  # duplicate accepts never insert a second pickup
         offer = self.offers.pop(msg.content.get("offer_id"), None)
         if not offer:
-            self.refuse(msg, "expired_or_unknown_offer")
+            self.refuse(msg, "unknown_offer")
             return
         if not self.matches_offer(offer, msg) or self.latest_round.get(msg.sender) != msg.conversation_id:
             # A foreign sender must not consume another passenger's offer.
             self.offers[offer["offer_id"]] = offer
             self.refuse(msg, "stale_or_foreign_offer")
             return
-        trip = dict(offer["trip"], pickup_by=offer["pickup_by"])
+        trip = offer["trip"]
         best = self.best_insertion(trip, msg.sender)
         if now >= trip["search_deadline"]:
             self.refuse(msg, "search_timeout")
@@ -186,7 +185,7 @@ class Taxi(TaxiPlanner, MessageAgent):
             return
 
         pickup_duration = max(0, pickup_t - self.model.boarding_time)
-        pickup_by = min(offer["pickup_by"], now + pickup_duration + self.model.pickup_slack)
+        pickup_by = now + pickup_duration + self.model.pickup_slack
         contract = {"offer_id": offer["offer_id"], "round_id": msg.conversation_id, "pickup_by": pickup_by}
         self.plan = plan
         self.contracts[msg.sender] = contract
@@ -208,14 +207,10 @@ class Taxi(TaxiPlanner, MessageAgent):
             return
         pickup_t, dropoff_t = best[2]
         pickup_duration = max(0, pickup_t - self.model.boarding_time)
-        # Search expiry governs acceptance, not the future time of boarding.
-        pickup_by = now + self.model.offer_ttl + pickup_duration
         self.offer_sequence += 1
         offer_id = f"{self.unique_id}:{self.offer_sequence}"
         offer = {"offer_id": offer_id, "passenger": msg.sender, "round_id": msg.conversation_id,
-                 "trip": dict(msg.content), "expires_at": min(now + self.model.offer_ttl,
-                                                             msg.content["search_deadline"] - 1),
-                 "pickup_by": pickup_by, "pickup_at": now + 1 + pickup_duration,
+                 "trip": dict(msg.content), "pickup_at": now + 1 + pickup_duration,
                  "pickup_eta": pickup_t, "ride": dropoff_t - pickup_t}
         self.offers[offer_id] = offer
         self.reply(msg, PROPOSE, {key: value for key, value in offer.items()

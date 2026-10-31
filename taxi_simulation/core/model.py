@@ -32,9 +32,7 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         boarding_time: steps needed to pick a passenger up.
         max_detour: accepted ride <= max_detour * direct time.
         max_wait: search timeout before a taxi confirms; does not limit pickup time.
-        offer_ttl: validity of a proposal in steps; alternatives survive a failed acceptance.
         pickup_slack: maximum extra pickup delay allowed when confirming an offer.
-        traffic: enforce directional lanes and junction reservations.
         cell_km: length of one road cell, in km.
         co2_per_km: CO2 a taxi emits per km driven, in grams.
         idle_co2_per_step: CO2 a taxi emits per step while stuck in traffic, in grams.
@@ -45,9 +43,9 @@ class CityModel(RoadMap, Traffic, mesa.Model):
 
     def __init__(self, n_taxis=10, capacity=2, allow_detour=False, demand=0.3,
                  taxi_steps_per_cell=1, boarding_time=1, max_detour=1.5, max_wait=60,
-                 offer_ttl=6, pickup_slack=3, traffic=True,
+                 pickup_slack=3,
                  cell_km=0.25, co2_per_km=150, idle_co2_per_step=25, stop_at=1000,
-                 seed=None, scenario=None, allow_multiple_pickups=False):
+                 seed=None, scenario=None, allow_multiple_pickups=True):
         super().__init__(rng=seed)
         # Passenger requests have their own random generator: with the same seed,
         # every run gets the same passengers, whatever the taxis do. Runs with
@@ -55,8 +53,8 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         self.demand_rng = np.random.default_rng(seed)
         if max_wait <= 0 or taxi_steps_per_cell < 1 or boarding_time < 0:
             raise ValueError("max_wait and taxi_steps_per_cell must be positive; boarding_time nonnegative")
-        if offer_ttl < 1 or pickup_slack < 0:
-            raise ValueError("offer_ttl must be positive; pickup_slack nonnegative")
+        if pickup_slack < 0:
+            raise ValueError("pickup_slack must be nonnegative")
         self.capacity = capacity
         self.allow_detour = allow_detour
         self.allow_multiple_pickups = allow_multiple_pickups
@@ -65,9 +63,7 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         self.boarding_time = boarding_time
         self.max_detour = max_detour
         self.max_wait = max_wait
-        self.offer_ttl = offer_ttl
         self.pickup_slack = pickup_slack
-        self.traffic = traffic
         self.cell_km = cell_km
         self.co2_per_km = co2_per_km
         self.idle_co2_per_step = idle_co2_per_step

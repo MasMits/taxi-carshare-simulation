@@ -69,8 +69,7 @@ class Passenger(MessageAgent):
                 continue
             offer_id = msg.content.get("offer_id")
             if msg.performative == PROPOSE and self.state == WAITING:
-                if (offer_id not in self.attempted_offers
-                        and msg.content.get("expires_at", -1) >= self.model.steps):
+                if offer_id not in self.attempted_offers:
                     self.offers[offer_id] = msg
                 continue
             if (msg.sender is not self.assigned_taxi or self.pending_offer is None
@@ -95,8 +94,6 @@ class Passenger(MessageAgent):
                     self.state = ARRIVED
                     self.arrival_step = msg.content["step"]
                     self.shared = msg.content["shared"]
-        self.offers = {key: offer for key, offer in self.offers.items()
-                       if offer.content["expires_at"] >= self.model.steps}
         return list(self.offers.values())
 
     def decide(self, proposals):
