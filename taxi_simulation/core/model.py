@@ -5,8 +5,6 @@ how they connect: build_map, road_neighbours, is_intersection and direction.
 Everything else (routes, traffic, passengers, statistics) works on any map.
 """
 
-from collections import Counter
-
 import mesa
 import numpy as np
 
@@ -82,11 +80,7 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         self.gave_up = 0
         self.messages_sent = 0
         self.trips = []  # finished trips: wait, ride, detour, shared
-        self.refusal_reasons = Counter()
-        self.repeat_searches = 0
-        self.alternative_attempts = 0
         self.confirmed_orders = 0
-        self.pickup_violations = 0
 
         # The DataCollector is an observer: it may read agent attributes,
         # agents may not read each other's (encapsulation).
@@ -95,11 +89,7 @@ class CityModel(RoadMap, Traffic, mesa.Model):
             "Riding": lambda m: m.count(BOARDING, RIDING),
             "Served": lambda m: len(m.trips),
             "Gave up": lambda m: m.gave_up,
-            "Confirming": lambda m: m.count(CONFIRMING),
-            "Repeat searches": lambda m: m.repeat_searches,
-            "Alternative attempts": lambda m: m.alternative_attempts,
             "Confirmed orders": lambda m: m.confirmed_orders,
-            "Pickup violations": lambda m: m.pickup_violations,
             "Blocked taxis": lambda m: sum(t.blocked for t in m.taxis()),
             "Traffic delay": lambda m: sum(t.traffic_delay for t in m.taxis()),
             "Avg wait": lambda m: m.average("wait"),

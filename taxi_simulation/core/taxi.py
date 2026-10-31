@@ -3,7 +3,7 @@
 from taxi_simulation.core.messages import (ACCEPT, CANCEL, CFP, CONFIRM, FAILURE, INFORM,
                                            PROPOSE, REFUSE, REJECT, MessageAgent)
 from taxi_simulation.core.passenger import Passenger
-from taxi_simulation.core.planning import DROPOFF, PICKUP, TaxiPlanner
+from taxi_simulation.core.planning import DROPOFF, TaxiPlanner
 
 # Taxi actions
 BOARD = "board"
@@ -51,7 +51,6 @@ class Taxi(TaxiPlanner, MessageAgent):
         self.latest_round = {}
         self.contracts = {}
         self.offer_sequence = 0
-        self.late_pickups = set()
 
     def step(self):
         self.blocked = False
@@ -62,9 +61,8 @@ class Taxi(TaxiPlanner, MessageAgent):
     def reply(self, msg, performative, content):
         self.send(msg.sender, performative, content, msg.conversation_id)
 
-    def refuse(self, msg, reason, performative=FAILURE):
-        self.model.refusal_reasons[reason] += 1
-        self.reply(msg, performative, {"reason": reason, "offer_id": msg.content.get("offer_id")})
+    def refuse(self, msg, performative=FAILURE):
+        self.reply(msg, performative, {"offer_id": msg.content.get("offer_id")})
 
     def notify(self, passenger, event, **content):
         contract = self.contracts.get(passenger)
@@ -91,7 +89,6 @@ class Taxi(TaxiPlanner, MessageAgent):
         messages = self.prepare_messages(messages)
         self.process_acceptances(messages)
         self.answer_calls(messages)
-        self.count_late_pickups()
 
         if self.boarding_left > 0:
             return BOARD
@@ -146,13 +143,6 @@ class Taxi(TaxiPlanner, MessageAgent):
         for msg in sorted(calls.values(), key=lambda msg: msg.sender.unique_id):
             self.propose(msg)
 
-    def count_late_pickups(self):
-        for passenger, contract in self.contracts.items():
-            if (any(stop.kind == PICKUP and stop.passenger is passenger for stop in self.plan)
-                    and self.model.steps > contract["pickup_by"] and passenger not in self.late_pickups):
-                self.late_pickups.add(passenger)
-                self.model.pickup_violations += 1
-
     def accept_offer(self, msg):
         now = self.model.steps
         contract = self.contracts.get(msg.sender)
@@ -163,25 +153,22 @@ class Taxi(TaxiPlanner, MessageAgent):
             return  # duplicate accepts never insert a second pickup
         offer = self.offers.pop(msg.content.get("offer_id"), None)
         if not offer:
-            self.refuse(msg, "unknown_offer")
+            self.refuse(msg)
             return
         if not self.matches_offer(offer, msg) or self.latest_round.get(msg.sender) != msg.conversation_id:
             # A foreign sender must not consume another passenger's offer.
             self.offers[offer["offer_id"]] = offer
-            self.refuse(msg, "stale_or_foreign_offer")
+            self.refuse(msg)
             return
         trip = offer["trip"]
         best = self.best_insertion(trip, msg.sender)
-        if now >= trip["search_deadline"]:
-            self.refuse(msg, "search_timeout")
-            return
-        if best is None:
-            self.refuse(msg, self.unavailable_reason("commitment_conflict"))
+        if now >= trip["search_deadline"] or best is None:
+            self.refuse(msg)
             return
 
         _, plan, (pickup_t, dropoff_t) = best
         if dropoff_t - pickup_t > offer["ride"]:
-            self.refuse(msg, "changed_ride")
+            self.refuse(msg)  # the ride got longer than offered
             return
 
         pickup_duration = max(0, pickup_t - self.model.boarding_time)
@@ -199,11 +186,11 @@ class Taxi(TaxiPlanner, MessageAgent):
         self.latest_round[msg.sender] = msg.conversation_id
         self.offers = {key: value for key, value in self.offers.items() if value["passenger"] is not msg.sender}
         if now >= msg.content["search_deadline"]:
-            self.refuse(msg, "search_timeout", REFUSE)
+            self.refuse(msg, REFUSE)
             return
         best = self.best_insertion(msg.content, msg.sender)
         if best is None:
-            self.refuse(msg, self.unavailable_reason("route_constraints"), REFUSE)
+            self.refuse(msg, REFUSE)
             return
         pickup_t, dropoff_t = best[2]
         pickup_duration = max(0, pickup_t - self.model.boarding_time)
@@ -261,7 +248,6 @@ class Taxi(TaxiPlanner, MessageAgent):
         self.notify(passenger, "arrived", step=self.model.steps, shared=passenger in self.shared)
         self.contracts.pop(passenger, None)
         self.latest_round.pop(passenger, None)
-        self.late_pickups.discard(passenger)
         self.shared.discard(passenger)
 
     def start_boarding(self, passenger):

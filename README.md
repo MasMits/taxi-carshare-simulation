@@ -57,7 +57,7 @@ Passenger states are `waiting` (searching), `confirming` (acceptance sent), `ass
    latest pickup time. Offers are provisional, not seat reservations.
 3. The passenger accepts one offer and retains the others until confirmation or expiry.
 4. A taxi ranks competing acceptances, rechecks the offered conditions against its current route,
-   and replies with CONFIRM or FAILURE and a reason. Confirmation is allowed only when the
+   and replies with CONFIRM or FAILURE. Confirmation is allowed only when the
    new pickup can be the next stop and no confirmed pickup is still pending. A duplicate
    acceptance cannot book twice.
 5. A refused passenger tries a saved alternative in the same round. A fresh broadcast is needed
@@ -79,7 +79,7 @@ Yellow taxis have no bookings; orange taxis are assigned or carrying passengers.
 Every new insertion must preserve the pickup deadlines and ride tolerances of all confirmed
 passengers. Pickup promises refer to **boarding starting**, not boarding finishing. Newcomers
 cannot push an existing promise back. Predictions use free-flow travel: congestion can still
-cause a missed promise; each affected booking is counted once and remains active.
+cause a missed promise; the booking remains active.
 
 The controls are shared by grid, ring and irregular demos:
 
@@ -100,9 +100,8 @@ Round ID, offer ID and sender must match before an acceptance, confirmation or t
 change state. Expired offers and superseded rounds cannot create a new booking. Once confirmed,
 contract identity remains valid through arrival, independently of the proposal's expiry.
 
-The statistics panel shows pending confirmations, confirmed bookings, repeated broadcasts,
-attempts using saved alternatives, missed pickup promises and refusal reasons. These are event
-counts, not counts of distinct passengers: one passenger can receive several taxi refusals.
+The statistics panel shows CO₂ (total and per passenger), taxi km per passenger, empty km,
+passengers served, shared rides, confirmed bookings and the average wait and ride.
 
 **Traffic: lanes and queues** (default):
 

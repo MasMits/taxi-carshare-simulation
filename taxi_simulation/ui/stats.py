@@ -7,17 +7,6 @@ and compare the panels: every run gets the same passengers.
 import solara
 from mesa.visualization.utils import update_counter
 
-REFUSAL_LABELS = {
-    "capacity": "no seats available",
-    "pickup_in_progress": "already heading to a confirmed pickup",
-    "route_constraints": "incompatible route or pickup deadline",
-    "commitment_conflict": "conflicts with existing commitments",
-    "changed_ride": "offered ride time no longer available",
-    "unknown_offer": "offer unavailable",
-    "stale_or_foreign_offer": "offer identity mismatch",
-    "search_timeout": "search deadline reached",
-}
-
 
 def PollutionStats(model):
     update_counter.get()
@@ -33,8 +22,6 @@ def PollutionStats(model):
         progress = f"step {model.steps}"
     if not model.running:
         progress += " (finished)"
-    reasons = ", ".join(f"{REFUSAL_LABELS.get(reason, reason)}: {count}"
-                        for reason, count in sorted(model.refusal_reasons.items())) or "none"
 
     solara.Markdown(f"""
 ### {seats} · {progress}
@@ -49,11 +36,6 @@ def PollutionStats(model):
 | Km driven empty | {empty_km:.0f} % |
 | Passengers served | {served} of {model.spawned} |
 | Rides shared with someone | {100 * model.average('shared'):.0f} % |
-| Waiting for taxi confirmation | {model.count('confirming')} |
 | Confirmed orders | {model.confirmed_orders} |
-| Repeat searches / alternative attempts | {model.repeat_searches} / {model.alternative_attempts} |
-| Missed pickup promises | {model.pickup_violations} |
 | Average wait / ride | {model.average('wait'):.1f} / {model.average('ride'):.1f} steps |
-
-Refusals and search cancellations: {reasons}
 """)

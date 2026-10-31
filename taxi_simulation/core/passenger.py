@@ -46,8 +46,6 @@ class Passenger(MessageAgent):
         self.offers = {}
         self.pending_offer = None
         self.promised_pickup = None
-        self.searches = 0
-        self.attempts_in_round = 0
         self.attempted_offers = set()
 
     def trip(self):
@@ -123,9 +121,6 @@ class Passenger(MessageAgent):
 
     def act(self, action, offer, proposals):
         if action == "accept":
-            if self.attempts_in_round:
-                self.model.alternative_attempts += 1
-            self.attempts_in_round += 1
             self.attempted_offers.add(offer.content["offer_id"])
             self.offers.pop(offer.content["offer_id"], None)
             self.send(offer.sender, ACCEPT, {"offer_id": offer.content["offer_id"]}, self.round_id)
@@ -138,16 +133,11 @@ class Passenger(MessageAgent):
                           {"offer_id": self.pending_offer.content["offer_id"]}, self.round_id)
             self.release_offers()
             self.model.gave_up += 1
-            self.model.refusal_reasons["search_timeout"] += 1
             self.remove()
         elif action == "call":
             self.release_offers()
             self.round_id += 1
-            self.attempts_in_round = 0
             self.attempted_offers.clear()
-            if self.searches:
-                self.model.repeat_searches += 1
-            self.searches += 1
             for taxi in self.model.taxi_directory():
                 self.send(taxi, CFP, self.trip(), self.round_id)
         elif action == "get in":

@@ -40,13 +40,6 @@ class TaxiPlanner:
         """Whether any confirmed passenger is still waiting for pickup."""
         return any(stop.kind == PICKUP for stop in self.plan)
 
-    def unavailable_reason(self, fallback):
-        if self.booked() >= self.model.capacity:
-            return "capacity"
-        if self.has_pending_pickup() and not self.model.allow_multiple_pickups:
-            return "pickup_in_progress"
-        return fallback
-
     def legs(self, plan):
         """Drive through a plan from here: yield each stop and the road cells leading to it."""
         cell, heading = self.pos, self.heading
