@@ -26,6 +26,7 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         n_taxis: number of taxis.
         capacity: seats per taxi, 1 = classic taxi.
         allow_detour: False = no route change for shared rides.
+        allow_multiple_pickups: allow a new next pickup while another pickup is pending.
         demand: mean number of new requests per step.
         taxi_steps_per_cell: steps needed to drive along one road cell.
         boarding_time: steps needed to pick a passenger up.
@@ -33,7 +34,6 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         max_wait: search timeout before a taxi confirms; does not limit pickup time.
         offer_ttl: validity of a proposal in steps; alternatives survive a failed acceptance.
         pickup_slack: maximum extra pickup delay allowed when confirming an offer.
-        wait_priority: time-cost discount per step the requesting passenger has waited.
         traffic: enforce directional lanes and junction reservations.
         cell_km: length of one road cell, in km.
         co2_per_km: CO2 a taxi emits per km driven, in grams.
@@ -45,9 +45,9 @@ class CityModel(RoadMap, Traffic, mesa.Model):
 
     def __init__(self, n_taxis=10, capacity=2, allow_detour=False, demand=0.3,
                  taxi_steps_per_cell=1, boarding_time=1, max_detour=1.5, max_wait=60,
-                 offer_ttl=6, pickup_slack=3, wait_priority=0.5, traffic=True,
+                 offer_ttl=6, pickup_slack=3, traffic=True,
                  cell_km=0.25, co2_per_km=150, idle_co2_per_step=25, stop_at=1000,
-                 seed=None, scenario=None):
+                 seed=None, scenario=None, allow_multiple_pickups=False):
         super().__init__(rng=seed)
         # Passenger requests have their own random generator: with the same seed,
         # every run gets the same passengers, whatever the taxis do. Runs with
@@ -55,10 +55,11 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         self.demand_rng = np.random.default_rng(seed)
         if max_wait <= 0 or taxi_steps_per_cell < 1 or boarding_time < 0:
             raise ValueError("max_wait and taxi_steps_per_cell must be positive; boarding_time nonnegative")
-        if offer_ttl < 1 or pickup_slack < 0 or wait_priority < 0:
-            raise ValueError("offer_ttl must be positive; pickup_slack and wait_priority nonnegative")
+        if offer_ttl < 1 or pickup_slack < 0:
+            raise ValueError("offer_ttl must be positive; pickup_slack nonnegative")
         self.capacity = capacity
         self.allow_detour = allow_detour
+        self.allow_multiple_pickups = allow_multiple_pickups
         self.demand = demand
         self.taxi_steps_per_cell = taxi_steps_per_cell
         self.boarding_time = boarding_time
@@ -66,7 +67,6 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         self.max_wait = max_wait
         self.offer_ttl = offer_ttl
         self.pickup_slack = pickup_slack
-        self.wait_priority = wait_priority
         self.traffic = traffic
         self.cell_km = cell_km
         self.co2_per_km = co2_per_km
@@ -76,8 +76,6 @@ class CityModel(RoadMap, Traffic, mesa.Model):
         self.build_map()
         self._distances = {}  # target -> {road cell: road distance to target}
         self._routes = {}
-        self._pickup_routes = {}
-        self._pickup_distances = {}
         self._move_requests = {}
 
         for _ in range(n_taxis):

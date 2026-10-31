@@ -33,7 +33,7 @@ class Traffic:
             if not taxi.in_traffic:
                 keys.append(self.lane_key(taxi.pos, heading))
             if self.traffic and self.is_intersection(nxt) and nxt != taxi.plan[0].cell:
-                exit_cell = taxi.route_to_stop(taxi.plan, 0, cell=nxt, heading=heading, first=False)[0]
+                exit_cell = taxi.route_to(taxi.plan[0].cell, cell=nxt, heading=heading, first=False)[0]
                 keys.append(self.lane_key(exit_cell, self.direction(nxt, exit_cell)))
             blocked = self.traffic and any(
                 (k in occupied and occupied[k] is not taxi)

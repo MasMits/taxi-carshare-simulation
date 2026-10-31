@@ -22,37 +22,28 @@ class Stop:
 class TaxiPlanner:
     """Mixed into Taxi, which holds the plan, the passengers on board and the contracts."""
 
-    def route_to(self, target, cell=None, heading=None, first=True, pickup_next=None):
+    def route_to(self, target, cell=None, heading=None, first=True):
         """Include any exit already reserved while traversing a junction."""
         cell = self.pos if cell is None else cell
         heading = self.heading if heading is None and first else heading
         if first and self.junction_exit is not None:
             exit_cell = self.junction_exit
             direction = self.model.direction(cell, exit_cell)
-            return (exit_cell,) + self.route_to(target, exit_cell, direction, first=False,
-                                                pickup_next=pickup_next)
-        if pickup_next is not None:
-            return self.model.pickup_route(cell, target, pickup_next, heading)
+            return (exit_cell,) + self.route_to(target, exit_cell, direction, first=False)
         return self.model.route(cell, target, heading)
-
-    def route_to_stop(self, plan, index, cell=None, heading=None, first=True):
-        """Share the same pickup approach between planning, driving and drawing."""
-        stop = plan[index]
-        onward = plan[index + 1].cell if stop.kind == PICKUP and index + 1 < len(plan) else None
-        return self.route_to(stop.cell, cell, heading, first=first, pickup_next=onward)
 
     def booked(self):
         """Passengers on board or waiting for this taxi."""
         return len(self.onboard) + sum(stop.kind == PICKUP for stop in self.plan)
 
     def has_pending_pickup(self):
-        """A confirmed next pickup cannot be displaced by another booking."""
+        """Whether any confirmed passenger is still waiting for pickup."""
         return any(stop.kind == PICKUP for stop in self.plan)
 
     def unavailable_reason(self, fallback):
         if self.booked() >= self.model.capacity:
             return "capacity"
-        if self.has_pending_pickup():
+        if self.has_pending_pickup() and not self.model.allow_multiple_pickups:
             return "pickup_in_progress"
         return fallback
 
@@ -60,7 +51,7 @@ class TaxiPlanner:
         """Drive through a plan from here: yield each stop and the road cells leading to it."""
         cell, heading = self.pos, self.heading
         for i, stop in enumerate(plan):
-            route = self.route_to_stop(plan, i, cell, heading, first=i == 0)
+            route = self.route_to(stop.cell, cell, heading, first=i == 0)
             if route:
                 heading = self.model.direction(route[-2] if len(route) > 1 else cell, route[-1])
             cell = stop.cell
@@ -111,12 +102,15 @@ class TaxiPlanner:
     def best_insertion(self, trip, passenger):
         """Cheapest feasible plan that also serves the new trip.
 
-        A new pickup must be the next stop, with no earlier pickup still
-        pending. Existing drop-offs keep their order; the new drop-off may
-        follow any of them. Without detours the current route cannot lengthen.
+        By default only one pending pickup is allowed, always as the next stop.
+        With multiple pickups enabled, a new pickup can precede pending pickups.
+        Existing stops keep their order and commitments remain feasible.
+        Without detours the current route cannot lengthen.
         Returns (finish_time, plan, (pickup_t, dropoff_t)) or None.
         """
-        if self.booked() >= self.model.capacity or self.has_pending_pickup():
+        if self.booked() >= self.model.capacity:
+            return None
+        if self.has_pending_pickup() and not self.model.allow_multiple_pickups:
             return None
         pickup = Stop(trip["pickup"], PICKUP, passenger, trip["max_ride"])
         dropoff = Stop(trip["dropoff"], DROPOFF, passenger, trip["max_ride"])
@@ -126,7 +120,7 @@ class TaxiPlanner:
             plan = [pickup] + self.plan[:j] + [dropoff] + self.plan[j:]
             if (self.plan and not self.model.allow_detour
                     and self.plan_distance(plan) > old_distance):
-                continue  # the current route may not change
+                continue
             result = self.evaluate(plan)
             if result is None:
                 continue

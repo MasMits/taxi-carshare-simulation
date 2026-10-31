@@ -85,8 +85,7 @@ class Taxi(TaxiPlanner, MessageAgent):
             cost = (self.plan_distance(best[1]) - self.plan_distance(self.plan)) * self.model.taxi_steps_per_cell
         else:
             cost = best[2][0] - self.model.boarding_time
-        age = self.model.steps - trip.get("request_step", self.model.steps)
-        return cost - self.model.wait_priority * age
+        return cost
 
     def decide(self, messages):
         messages = self.prepare_messages(messages)
@@ -96,7 +95,7 @@ class Taxi(TaxiPlanner, MessageAgent):
 
         if self.boarding_left > 0:
             return BOARD
-        if self.plan and self.plan[0].cell == self.pos and not self.route_to_stop(self.plan, 0):
+        if self.plan and self.plan[0].cell == self.pos:
             return SERVE
         return DRIVE if self.plan else WAIT
 
@@ -125,9 +124,8 @@ class Taxi(TaxiPlanner, MessageAgent):
     def acceptance_priority(self, msg):
         offer = self.offers.get(msg.content.get("offer_id"))
         if not self.matches_offer(offer, msg):
-            return float("inf"), self.model.steps, msg.sender.unique_id
-        return (self.request_score(offer["trip"], msg.sender),
-                offer["trip"].get("request_step", self.model.steps), msg.sender.unique_id)
+            return float("inf"), msg.sender.unique_id
+        return self.request_score(offer["trip"], msg.sender), msg.sender.unique_id
 
     def process_acceptances(self, messages):
         accepts = [msg for msg in messages if msg.performative == ACCEPT]
@@ -245,7 +243,7 @@ class Taxi(TaxiPlanner, MessageAgent):
             # then the taxi moves to the next one.
             self.progress = min(self.progress + 1, self.model.taxi_steps_per_cell)
             if self.progress >= self.model.taxi_steps_per_cell:
-                nxt = self.route_to_stop(self.plan, 0)[0]
+                nxt = self.route_to(self.plan[0].cell)[0]
                 self.model.request_move(self, nxt)
         if not self.plan or self.boarding_left:
             self.park()
@@ -257,8 +255,6 @@ class Taxi(TaxiPlanner, MessageAgent):
         `boarding_time` steps.
         """
         while self.boarding_left == 0 and self.plan and self.plan[0].cell == self.pos:
-            if self.route_to_stop(self.plan, 0):
-                break  # pass the passenger until returning in the correct lane
             stop = self.plan.pop(0)
             if stop.kind == DROPOFF:
                 self.drop_off(stop.passenger)
