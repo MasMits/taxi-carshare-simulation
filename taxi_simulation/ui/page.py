@@ -6,8 +6,8 @@ from mesa.visualization import SolaraViz, make_plot_component
 
 from taxi_simulation.ui.stats import PollutionStats
 
+CO2_CHART = make_plot_component({"CO2 per passenger (g)": "tab:brown"})  # under the statistics
 CHARTS = [  # on the second tab, "Graphs"
-    make_plot_component({"CO2 per passenger (g)": "tab:brown"}, page=1),
     make_plot_component({"Waiting": "tab:blue", "Riding": "tab:green", "Blocked taxis": "magenta"},
                         page=1),
     make_plot_component({"Served": "tab:green", "Gave up": "tab:red"}, page=1),
@@ -37,11 +37,11 @@ def simulation_params(n_taxis, allow_detour):
 
 
 def city_page(model, params, renderer=None, map_component=None):
-    """A SolaraViz page: map and statistics on the first tab, charts on the second.
+    """A SolaraViz page: map, statistics and CO2 on the first tab, charts on the second.
 
     The map is either a Mesa renderer or a component of our own.
     """
-    components = [PollutionStats, *CHARTS]
+    components = [PollutionStats, CO2_CHART, *CHARTS]
     if map_component is not None:
         components.insert(0, map_component)
     return SolaraViz(model, renderer, components=components, model_params=params,
@@ -51,10 +51,11 @@ def city_page(model, params, renderer=None, map_component=None):
 # --- Two tweaks of Mesa's SolaraViz, which has no option for them ------------
 
 def layout(count):
-    """Page 0: map and statistics side by side. Page 1: the charts, two per row."""
-    if count == 2:
-        return [{"i": 0, "w": 7, "h": 17, "moved": False, "x": 0, "y": 0},
-                {"i": 1, "w": 5, "h": 18, "moved": False, "x": 7, "y": 0}]
+    """Page 0: the map, with statistics and the CO2 chart beside it. Page 1: the charts, two per row."""
+    if count == 3:
+        return [{"i": 0, "w": 7, "h": 18, "moved": False, "x": 0, "y": 0},
+                {"i": 1, "w": 5, "h": 10, "moved": False, "x": 7, "y": 0},
+                {"i": 2, "w": 5, "h": 8, "moved": False, "x": 7, "y": 10}]
     return [{"i": i, "w": 6, "h": 10, "moved": False, "x": 6 * (i % 2), "y": 10 * (i // 2)}
             for i in range(count)]
 
